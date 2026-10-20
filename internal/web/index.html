@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ttd — загрузчик TikTok</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --panel: #171a23;
+    --panel2: #1e2230;
+    --line: #2a3040;
+    --text: #e6e9f0;
+    --dim: #8b93a7;
+    --accent: #25d0c0;
+    --accent2: #7c6cff;
+    --ok: #38d39f;
+    --warn: #f2c14e;
+    --err: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 -apple-system, Segoe UI, Roboto, Ubuntu, sans-serif;
+  }
+  header {
+    padding: 18px 24px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  }
+  header h1 { font-size: 18px; margin: 0; letter-spacing: .3px; }
+  header .badge {
+    background: var(--panel2); color: var(--dim); border: 1px solid var(--line);
+    border-radius: 999px; padding: 3px 10px; font-size: 12px;
+  }
+  main { max-width: 1100px; margin: 0 auto; padding: 22px; display: grid; gap: 22px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px;
+  }
+  .card h2 { margin: 0 0 12px; font-size: 15px; color: var(--dim); font-weight: 600; letter-spacing: .4px; text-transform: uppercase; }
+  textarea {
+    width: 100%; min-height: 110px; resize: vertical;
+    background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 10px; padding: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px;
+  }
+  textarea:focus, select:focus, input:focus { outline: 2px solid var(--accent2); outline-offset: 1px; }
+  .row { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
+  label.field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--dim); }
+  select, input[type=date], input[type=number] {
+    background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 8px; padding: 7px 10px; font-size: 14px;
+  }
+  .check { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--text); }
+  button {
+    border: 0; border-radius: 10px; padding: 10px 18px; font-size: 14px; font-weight: 600;
+    cursor: pointer; color: #06231f; background: var(--accent);
+  }
+  button.secondary { background: var(--panel2); color: var(--text); border: 1px solid var(--line); }
+  button.danger { background: var(--err); color: #2a0b0b; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  #log {
+    margin-top: 14px; background: #0b0d13; border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px; height: 230px; overflow: auto; font-family: ui-monospace, monospace; font-size: 12.5px;
+    white-space: pre-wrap;
+  }
+  #log .e { color: var(--err); }
+  #log .ok { color: var(--ok); }
+  #log .w { color: var(--warn); }
+  #log .d { color: var(--dim); }
+  #bar { height: 8px; background: var(--panel2); border-radius: 999px; overflow: hidden; margin-top: 12px; }
+  #bar > div { height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--accent2)); transition: width .2s; }
+  .folder { border: 1px solid var(--line); border-radius: 12px; margin-bottom: 12px; overflow: hidden; }
+  .folder > .head {
+    background: var(--panel2); padding: 10px 14px; display: flex; justify-content: space-between;
+    align-items: center; cursor: pointer; font-family: ui-monospace, monospace; font-size: 13.5px;
+  }
+  .folder > .head .meta { color: var(--dim); font-size: 12px; }
+  .files { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; padding: 12px; }
+  .file {
+    background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 8px;
+    font-size: 12px; overflow: hidden;
+  }
+  .file a { color: var(--accent); text-decoration: none; word-break: break-all; }
+  .file video, .file img { width: 100%; border-radius: 6px; margin-top: 6px; max-height: 190px; object-fit: cover; background: #000; }
+  .file .size { color: var(--dim); }
+  .empty { color: var(--dim); font-size: 14px; }
+  .status-line { font-size: 13px; color: var(--dim); margin-top: 10px; }
+  a.plain { color: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>ttd</h1>
+  <span class="badge" id="ver">версия …</span>
+  <span class="badge" id="root">библиотека …</span>
+  <span class="badge" id="tools">движки …</span>
+  <button class="secondary" id="install" style="margin-left:auto">Установить движки</button>
+</header>
+
+<main>
+  <section class="card">
+    <h2>Скачать из TikTok</h2>
+    <textarea id="urls" placeholder="Вставьте ссылки TikTok — по одной в строке:
+https://www.tiktok.com/@user/video/7412345678901234567
+https://www.tiktok.com/@user/photo/7412345678901234567
+https://www.tiktok.com/@user
+https://www.tiktok.com/@user/stories"></textarea>
+    <div class="row">
+      <label class="field">Движок
+        <select id="engine">
+          <option value="auto">auto</option>
+          <option value="gallery-dl">gallery-dl</option>
+          <option value="yt-dlp">yt-dlp</option>
+          <option value="mock">mock (демо)</option>
+        </select>
+      </label>
+      <label class="field">Качество
+        <select id="quality">
+          <option value="best">максимальное</option>
+          <option value="1080">1080p</option>
+          <option value="720">720p</option>
+          <option value="480">480p</option>
+        </select>
+      </label>
+      <label class="field">Дата скачивания
+        <input type="date" id="date">
+      </label>
+      <label class="check"><input type="checkbox" id="stories"> Истории профиля</label>
+      <label class="check"><input type="checkbox" id="audio"> Только звук</label>
+    </div>
+    <div class="row">
+      <button id="start">Скачать</button>
+      <button class="danger" id="stop" disabled>Остановить</button>
+      <span class="status-line" id="status"></span>
+    </div>
+    <div id="bar"><div></div></div>
+    <div id="log"></div>
+  </section>
+
+  <section class="card">
+    <h2>Библиотека</h2>
+    <div class="row"><button class="secondary" id="refresh">Обновить</button></div>
+    <div id="library" style="margin-top:14px"></div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let jobId = null, since = 0, timer = null;
+
+function dateToISO(d) {
+  const p = (n) => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+}
+
+function logLine(text, cls) {
+  const box = $('log');
+  const el = document.createElement('div');
+  if (cls) el.className = cls;
+  el.textContent = text;
+  box.appendChild(el);
+  box.scrollTop = box.scrollHeight;
+  while (box.childNodes.length > 800) box.removeChild(box.firstChild);
+}
+
+async function loadMeta() {
+  const meta = await (await fetch('/api/meta')).json();
+  $('ver').textContent = 'версия ' + meta.version;
+  $('root').textContent = 'библиотека ' + meta.media_root;
+  const missing = ['gallery-dl', 'yt-dlp'].filter((n) => !meta.tools[n]);
+  $('tools').textContent = missing.length
+    ? 'не найдены: ' + missing.join(', ')
+    : 'движки: ' + Object.entries(meta.versions).map(([k, v]) => k + ' ' + (v || '')).join(', ');
+  $('engine').value = meta.engine || 'auto';
+  $('quality').value = meta.quality || 'best';
+  $('stories').checked = !!meta.stories;
+}
+
+async function loadLibrary() {
+  const data = await (await fetch('/api/library')).json();
+  const box = $('library');
+  box.innerHTML = '';
+  if (!data.folders || data.folders.length === 0) {
+    box.innerHTML = '<div class="empty">Пока ничего не скачано.</div>';
+    return;
+  }
+  for (const folder of data.folders) {
+    const wrap = document.createElement('div');
+    wrap.className = 'folder';
+    const head = document.createElement('div');
+    head.className = 'head';
+    head.innerHTML = '<span>' + escapeHtml(folder.name) + '</span>' +
+      '<span class="meta">видео ' + folder.videos + ' · фото ' + folder.photos +
+      ' · ' + humanSize(folder.size) + '</span>';
+    const files = document.createElement('div');
+    files.className = 'files';
+    files.style.display = 'none';
+    head.onclick = () => { files.style.display = files.style.display === 'none' ? 'grid' : 'none'; };
+    for (const file of folder.files) {
+      files.appendChild(fileCard(folder.name, file));
+    }
+    wrap.appendChild(head);
+    wrap.appendChild(files);
+    box.appendChild(wrap);
+  }
+}
+
+function fileCard(folder, file) {
+  const card = document.createElement('div');
+  card.className = 'file';
+  const url = '/api/files?folder=' + encodeURIComponent(folder) + '&name=' + encodeURIComponent(file.name);
+  const title = document.createElement('div');
+  title.innerHTML = '<a href="' + url + '" target="_blank">' + escapeHtml(file.name) + '</a><br>' +
+    '<span class="size">' + humanSize(file.size) + '</span>';
+  card.appendChild(title);
+  if (file.kind === 'video') {
+    const video = document.createElement('video');
+    video.src = url; video.controls = true; video.preload = 'metadata';
+    card.appendChild(video);
+  } else if (file.kind === 'photo') {
+    const img = document.createElement('img');
+    img.src = url; img.loading = 'lazy';
+    card.appendChild(img);
+  }
+  return card;
+}
+
+async function start() {
+  const urls = $('urls').value.split('\n').map((s) => s.trim()).filter(Boolean);
+  if (!urls.length) { alert('Вставьте хотя бы одну ссылку'); return; }
+  $('log').innerHTML = '';
+  since = 0;
+  $('start').disabled = true; $('stop').disabled = false;
+  const payload = {
+    urls,
+    engine: $('engine').value,
+    quality: $('quality').value,
+    stories: $('stories').checked,
+    audio_only: $('audio').checked,
+    date: $('date').value,
+  };
+  const response = await fetch('/api/download', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+  });
+  const data = await response.json();
+  if (data.error) { logLine(data.error, 'e'); resetButtons(); return; }
+  jobId = data.id;
+  logLine('задача ' + jobId + ' создана', 'd');
+  poll();
+}
+
+function poll() {
+  clearTimeout(timer);
+  timer = setTimeout(async () => {
+    if (!jobId) return;
+    const response = await fetch('/api/job/' + jobId + '?since=' + since);
+    const data = await response.json();
+    for (const event of (data.events || [])) since++;
+    (data.events || []).forEach(renderEvent);
+    if (data.status === 'running') { poll(); }
+    else {
+      logLine('— завершено —', 'ok');
+      resetButtons();
+      loadLibrary();
+    }
+  }, 600);
+}
+
+function renderEvent(event) {
+  switch (event.type) {
+    case 'start':
+      logLine('начало: ссылок ' + event.count + ', папка-дата ' + event.date, 'd');
+      break;
+    case 'job':
+      logLine('[' + event.index + '/' + event.total + '] ' + event.url + '  (' + event.engine + ')');
+      break;
+    case 'progress':
+      $('bar').firstElementChild.style.width = Math.max(0, Math.min(100, event.percent || 0)) + '%';
+      $('status').textContent = 'загрузка ' + Math.round(event.percent || 0) + '% ' + (event.speed || '') + ' ' + (event.eta || '');
+      break;
+    case 'file':
+      logLine('  скачано: ' + event.file.name + ' (' + humanSize(event.file.size) + ')', 'ok');
+      break;
+    case 'saved':
+      logLine('  сохранено в ' + event.folder);
+      break;
+    case 'result':
+      if (event.status === 'ok') logLine('  итог: ok, файлов ' + (event.files || []).length, 'ok');
+      else if (event.status === 'skipped') logLine('  итог: пропущено (уже есть)', 'w');
+      else logLine('  итог: ошибка — ' + (event.error || ''), 'e');
+      break;
+    case 'error':
+      logLine('ошибка: ' + (event.error || event.line || ''), 'e');
+      break;
+    case 'install':
+      logLine('  установка: ' + event.line, 'd');
+      break;
+    case 'done':
+      logLine('готово: файлов ' + event.files + ', объём ' + humanSize(event.size), 'ok');
+      $('bar').firstElementChild.style.width = '100%';
+      break;
+    default:
+      if (event.line) logLine('  ' + event.line, 'd');
+  }
+}
+
+async function stop() {
+  if (!jobId) return;
+  await fetch('/api/job/' + jobId + '/cancel', { method: 'POST' });
+  logLine('запрошена остановка…', 'w');
+}
+
+function resetButtons() {
+  $('start').disabled = false; $('stop').disabled = true; jobId = null;
+}
+
+async function install() {
+  $('install').disabled = true;
+  logLine('устанавливаю движки…', 'd');
+  const response = await fetch('/api/install', { method: 'POST' });
+  const data = await response.json();
+  if (data.ok) logLine('движки установлены', 'ok'); else logLine('ошибка установки: ' + (data.error || ''), 'e');
+  $('install').disabled = false;
+  loadMeta();
+}
+
+function humanSize(bytes) {
+  if (!bytes && bytes !== 0) return '?';
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+  let value = bytes, i = 0;
+  while (value >= 1024 && i < units.length - 1) { value /= 1024; i++; }
+  return (i === 0 ? value : value.toFixed(1)) + ' ' + units[i];
+}
+
+function escapeHtml(text) {
+  return String(text).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+$('start').onclick = start;
+$('stop').onclick = stop;
+$('refresh').onclick = loadLibrary;
+$('install').onclick = install;
+$('date').value = dateToISO(new Date());
+loadMeta();
+loadLibrary();
+</script>
+</body>
+</html>
