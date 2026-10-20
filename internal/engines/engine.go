@@ -167,16 +167,20 @@ func engineEnv() []string {
 	return append(os.Environ(), "PYTHONIOENCODING=utf-8")
 }
 
-// CandidateBinDirs — где искать движки.
+// CandidateBinDirs — где искать движки: окружения из VenvCandidates и обычные
+// каталоги исполняемых файлов.
 func CandidateBinDirs() []string {
-	root := config.ProjectRoot()
-	home, _ := os.UserHomeDir()
-	return []string{
-		filepath.Join(root, ".venv", "bin"),
-		filepath.Join(root, ".venv", "Scripts"),
-		filepath.Join(home, ".local", "share", "ttd", "venv", "bin"),
-		filepath.Join(home, ".local", "bin"),
+	dirs := make([]string, 0, 12)
+	for _, venv := range config.VenvCandidates() {
+		dirs = append(dirs, filepath.Join(venv, "bin"), filepath.Join(venv, "Scripts"))
 	}
+	home, _ := os.UserHomeDir()
+	dirs = append(dirs,
+		filepath.Join(home, ".local", "bin"),
+		"/usr/local/bin",
+		"/usr/bin",
+	)
+	return dirs
 }
 
 // FindTools ищет gallery-dl и yt-dlp. Пустая строка — не найден.

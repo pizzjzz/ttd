@@ -86,31 +86,56 @@ cd ~/ttd
 ## 4. Установка одной командой
 
 ```bash
-./scripts/install.sh
+./install.sh
 ```
 
-Скрипт делает четыре вещи:
+Скрипт делает пять вещей:
 
-1. находит компилятор Go;
-2. собирает бинарник `./ttd` из `./cmd/ttd`;
-3. запускает `ttd install` — создаёт окружение `.venv` и ставит в него
-   `gallery-dl` и `yt-dlp`;
-4. создаёт символическую ссылку `~/.local/bin/ttd → <каталог>/ttd`.
+1. находит компилятор Go версии 1.22 или новее;
+2. собирает бинарник из `./cmd/ttd`;
+3. копирует его в `~/.local/bin/ttd`;
+4. запускает `ttd install` — создаёт окружение `~/.local/share/ttd/venv` и
+   ставит в него `gallery-dl` и `yt-dlp`;
+5. добавляет `~/.local/bin` в `PATH` в `~/.bashrc` и `~/.zshrc`.
 
-Если в конце появится подсказка про `PATH`, выполните её:
+После этого команда `ttd` работает из любого каталога, а каталог с исходниками
+можно удалить — движки лежат отдельно, в `~/.local/share/ttd/venv`.
+
+Чтобы изменения `PATH` применились в текущем терминале:
 
 ```bash
-export PATH="$HOME/.local/bin:$PATH"
-# чтобы сохранить навсегда:
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc     # для bash
+source ~/.zshrc      # для zsh
+```
+
+или просто откройте новый терминал.
+
+### Параметры установщика
+
+| Параметр | Что делает |
+| --- | --- |
+| `--bin-dir <путь>` | куда положить бинарник (по умолчанию `~/.local/bin`) |
+| `--data-dir <путь>` | куда поставить движки (по умолчанию `~/.local/share/ttd`) |
+| `--system` | системная установка в `/usr/local` (запускать через `sudo`) |
+| `--no-engines` | не устанавливать `gallery-dl` и `yt-dlp` |
+| `--no-rc` | не менять `~/.bashrc` и `~/.zshrc` |
+| `--uninstall` | удалить программу и движки |
+| `--purge` | вместе с `--uninstall` удалить весь каталог данных |
+
+Примеры:
+
+```bash
+./install.sh --bin-dir ~/bin --data-dir ~/.local/share/ttd
+sudo ./install.sh --system            # в /usr/local/bin для всех пользователей
+./install.sh --uninstall              # удалить программу и движки
 ```
 
 ### Сборка вручную (без скрипта)
 
 ```bash
 go build -trimpath -ldflags "-s -w" -o ttd ./cmd/ttd   # собрать
-./ttd install                                          # поставить движки
-sudo ln -sf "$PWD/ttd" /usr/local/bin/ttd              # по желанию: в PATH
+./ttd install                                          # движки в ~/.local/share/ttd/venv
+install -m 0755 ./ttd ~/.local/bin/ttd                 # в PATH
 ```
 
 ---
@@ -124,19 +149,24 @@ ttd doctor
 Ожидаемый вывод — примерно такой:
 
 ```
-каталог приложения: /home/user/ttd
+каталог приложения: /home/user/.local/bin
+каталог данных:    /home/user/.local/share/ttd
 библиотека:        /home/user/ttd
 файл настроек:     /home/user/.config/ttd/config.json
-локальные данные:  /home/user/ttd/.ttd-cache
+кэш библиотеки:    /home/user/ttd/.ttd-cache
 python:            /usr/bin/python3
-виртуальное окр.:  /home/user/ttd/.venv (есть)
-gallery-dl: /home/user/ttd/.venv/bin/gallery-dl — 1.32.17
-yt-dlp: /home/user/ttd/.venv/bin/yt-dlp — 2026.08.19
+виртуальное окр.:  /home/user/.local/share/ttd/venv (есть)
+gallery-dl: /home/user/.local/share/ttd/venv/bin/gallery-dl — 1.32.17
+yt-dlp: /home/user/.local/share/ttd/venv/bin/yt-dlp — 2026.08.19
 поддерживаемые движки: auto, gallery-dl, yt-dlp, mock
 ```
 
 Строки `gallery-dl` и `yt-dlp` должны содержать версии. Если вместо этого
 написано «не найден» — повторите `ttd install`.
+
+Если вы собирали программу вручную и запускаете её из каталога с исходниками,
+движки могут находиться в `<каталог>/.venv` — это тоже нормально: `ttd` сначала
+ищет окружение рядом с исходниками, затем в каталоге данных.
 
 ---
 
@@ -216,7 +246,7 @@ Description=ttd — локальный сайт загрузчика TikTok
 After=network.target
 
 [Service]
-ExecStart=$HOME/ttd/ttd web --no-browser
+ExecStart=%h/.local/bin/ttd web --no-browser
 Restart=on-failure
 
 [Install]
@@ -237,10 +267,10 @@ systemctl --user status ttd-web.service
 ```bash
 cd ~/ttd
 git pull
-./scripts/install.sh          # пересоберёт бинарник и обновит движки
+./install.sh                  # пересоберёт бинарник и обновит движки
 ```
 
-Обновить только движки:
+Если исходники уже удалены, а обновлять нужно только движки:
 
 ```bash
 ttd install
@@ -251,13 +281,21 @@ ttd install
 ## 10. Удаление
 
 ```bash
-rm -f ~/.local/bin/ttd                 # ссылка в PATH
-rm -rf ~/.config/ttd                   # настройки
-rm -rf ~/ttd                           # программа и скачанные файлы (!)
+./install.sh --uninstall      # бинарник, движки и строки PATH в ~/.bashrc и ~/.zshrc
+./install.sh --uninstall --purge   # плюс весь каталог данных ~/.local/share/ttd
 ```
 
-Каталог `~/ttd` содержит и программу, и библиотеку — удаляйте его только если
-готовы потерять скачанное.
+Вручную:
+
+```bash
+rm -f ~/.local/bin/ttd                 # программа
+rm -rf ~/.local/share/ttd              # движки и данные
+rm -rf ~/.config/ttd                   # настройки
+rm -rf ~/ttd                           # скачанные файлы (!)
+```
+
+Каталог `~/ttd` по умолчанию содержит скачанные файлы. Удаляйте его только если
+готовы потерять библиотеку.
 
 ---
 
@@ -265,8 +303,25 @@ rm -rf ~/ttd                           # программа и скачанны�
 
 **`ttd: команда не найдена`**
 Каталог `~/.local/bin` не в `PATH`. Выполните
-`export PATH="$HOME/.local/bin:$PATH"` и добавьте строку в `~/.bashrc`, либо
-запускайте программу из её каталога: `~/ttd/ttd`.
+`source ~/.bashrc` (или `source ~/.zshrc`) либо откройте новый терминал. Если
+строки с `PATH` нет — запустите `./install.sh` ещё раз или добавьте вручную:
+
+```bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+```
+
+**`ttd` работает, но «движки не найдены» после переноса каталога**
+Движки ищутся в `~/.local/share/ttd/venv`. Запустите `ttd install` — он поставит
+их в каталог данных, независимо от места бинарника.
+
+**`go.mod requires go >= …`**
+Установщик выбирает Go 1.22+ автоматически. Если в `PATH` оказался старый Go,
+укажите новый явно:
+
+```bash
+PATH="$HOME/.local/go/bin:$PATH" ./install.sh
+```
 
 **`не найден компилятор Go`**
 См. пункт 2. Если Go установлен в `~/.local/go`, добавьте его в `PATH`.

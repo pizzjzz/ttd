@@ -151,8 +151,75 @@ func (c Config) MediaPath() string {
 // CacheDir — служебный каталог внутри библиотеки (архивы, временные данные).
 func (c Config) CacheDir() string { return filepath.Join(c.MediaPath(), ".ttd-cache") }
 
-// VenvDir — локальное окружение с движками.
-func (c Config) VenvDir() string { return filepath.Join(ProjectRoot(), ".venv") }
+// DataDir — стабильный каталог данных установленного ttd (движки, окружение).
+// По умолчанию ~/.local/share/ttd; переопределяется TTD_DATA_DIR или
+// XDG_DATA_HOME.
+func DataDir() string {
+	if value := os.Getenv("TTD_DATA_DIR"); value != "" {
+		return util.ExpandHome(value)
+	}
+	if value := os.Getenv("XDG_DATA_HOME"); value != "" {
+		return filepath.Join(util.ExpandHome(value), "ttd")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join(ProjectRoot(), "data")
+	}
+	return filepath.Join(home, ".local", "share", "ttd")
+}
+
+// DataDirs перечисляет каталоги, где может лежать установленный ttd:
+// пользовательский, системный и каталог по умолчанию.
+func DataDirs() []string {
+	dirs := []string{DataDir()}
+	if home, err := os.UserHomeDir(); err == nil {
+		dirs = append(dirs, filepath.Join(home, ".local", "share", "ttd"))
+	}
+	dirs = append(dirs, "/usr/local/share/ttd", "/usr/share/ttd")
+	return dedupePaths(dirs)
+}
+
+// VenvCandidates перечисляет возможные расположения окружения с движками.
+// Порядок: явный TTD_VENV, окружение рядом с исходниками, каталоги данных.
+func VenvCandidates() []string {
+	dirs := make([]string, 0, 8)
+	if value := os.Getenv("TTD_VENV"); value != "" {
+		dirs = append(dirs, util.ExpandHome(value))
+	}
+	dirs = append(dirs, filepath.Join(ProjectRoot(), ".venv"))
+	for _, dataDir := range DataDirs() {
+		dirs = append(dirs, filepath.Join(dataDir, "venv"))
+	}
+	return dedupePaths(dirs)
+}
+
+// VenvDir — локальное окружение с движками. Если какое-то из возможных мест
+// уже существует, используется оно; иначе выбирается стабильный каталог данных.
+func (c Config) VenvDir() string {
+	for _, candidate := range VenvCandidates() {
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			return candidate
+		}
+	}
+	return filepath.Join(DataDir(), "venv")
+}
+
+func dedupePaths(paths []string) []string {
+	seen := make(map[string]bool, len(paths))
+	result := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if path == "" {
+			continue
+		}
+		cleaned := filepath.Clean(path)
+		if seen[cleaned] {
+			continue
+		}
+		seen[cleaned] = true
+		result = append(result, cleaned)
+	}
+	return result
+}
 
 func applyEnv(cfg *Config) {
 	setStr := func(env string, target *string) {

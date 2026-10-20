@@ -103,9 +103,10 @@ func Doctor(cfg *config.Config) []string {
 	tools := engines.FindTools(cfg)
 	lines := []string{}
 	lines = append(lines, "каталог приложения: "+config.ProjectRoot())
+	lines = append(lines, "каталог данных:    "+config.DataDir())
 	lines = append(lines, "библиотека:        "+cfg.MediaPath())
 	lines = append(lines, "файл настроек:     "+config.ConfigFile())
-	lines = append(lines, "локальные данные:  "+cfg.CacheDir())
+	lines = append(lines, "кэш библиотеки:    "+cfg.CacheDir())
 	if python := FindPython(); python != "" {
 		lines = append(lines, "python:            "+python)
 	} else {
