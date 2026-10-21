@@ -66,6 +66,15 @@ type Tui struct {
 	cancel  context.CancelFunc
 	results []model.JobResult
 
+	choosing      bool
+	choiceStep    int
+	choiceIndex   int
+	choiceInput   []byte
+	choiceOptions []tuiDestination
+	choiceTarget  tuiDestination
+	choiceMove    bool
+	choiceError   string
+
 	percent     float64
 	speed       string
 	eta         string
@@ -157,6 +166,9 @@ func (t *Tui) readKeys() {
 
 // handleKey обрабатывает нажатие; возвращает true, если нужно выйти.
 func (t *Tui) handleKey(ctx context.Context, key byte) bool {
+	if t.choosing {
+		return t.handleChoiceKey(key)
+	}
 	switch key {
 	case 0x04: // Ctrl-D
 		t.start(ctx)
@@ -339,7 +351,11 @@ func (t *Tui) handleEvent(event model.Event) {
 			t.appendLog("скачано: " + file.Name + " (" + util.HumanSize(file.Size) + ")")
 		}
 	case "saved":
-		t.appendLog("сохранено в " + asString(event["folder"]))
+		if flat, _ := event["flat"].(bool); flat {
+			t.appendLog("сохранено в разовую папку")
+		} else {
+			t.appendLog("сохранено в " + asString(event["folder"]))
+		}
 	case "log":
 		if t.verbose {
 			t.appendLog(asString(event["line"]))
@@ -374,6 +390,9 @@ func (t *Tui) handleEvent(event model.Event) {
 			t.status = service.FormatDone(results)
 		}
 		t.appendLog("загрузка завершена")
+		if t.cfg.AskDestination && hasChoiceFiles(t.results) {
+			t.beginChoice()
+		}
 	}
 }
 
@@ -406,6 +425,10 @@ func tuiStatus(status string) string {
 // draw перерисовывает экран.
 func (t *Tui) draw() {
 	width, height := termSize(int(os.Stdin.Fd()))
+	if t.choosing {
+		t.drawChoice(width, height)
+		return
+	}
 	middle := height - 12
 	if middle < 2 {
 		middle = 2

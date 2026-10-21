@@ -64,6 +64,11 @@ func (s *Service) Run(ctx context.Context, urls []string, opts model.DownloadOpt
 	if opts.Quality == "" {
 		opts.Quality = s.Config.Quality
 	}
+	if opts.Flat {
+		// Разовая папка: без архива повторов и служебного кэша.
+		opts.NoArchive = true
+		opts.CacheDir = ""
+	}
 
 	planned := s.Plan(urls, opts.IncludeStories)
 
@@ -100,13 +105,18 @@ func (s *Service) Run(ctx context.Context, urls []string, opts model.DownloadOpt
 	}
 
 	total, size := summarize(results)
+	folder := ""
+	if !opts.Flat {
+		folder = library.FolderName(opts.Date, opts.Date)
+	}
 	emit(model.Event{
 		"type": "done", "total": len(results), "files": total, "size": size,
 		"ok":        countStatus(results, model.StatusOK),
 		"skipped":   countStatus(results, model.StatusSkipped),
 		"errors":    countStatus(results, model.StatusError),
 		"cancelled": countStatus(results, model.StatusCancelled),
-		"folder":    library.FolderName(opts.Date, opts.Date),
+		"folder":    folder,
+		"flat":      opts.Flat,
 	})
 	return results
 }
@@ -209,16 +219,23 @@ func (s *Service) place(opts model.DownloadOptions, staging string) ([]model.Med
 			continue
 		}
 		source := filepath.Join(staging, name)
-		publish := opts.Date
-		if when, ok := engines.ReadPublishDate(source); ok {
-			publish = util.FormatDate(when)
+
+		folder := ""
+		var target string
+		if opts.Flat {
+			target = util.UniquePath(opts.MediaRoot, name)
+		} else {
+			publish := opts.Date
+			if when, ok := engines.ReadPublishDate(source); ok {
+				publish = util.FormatDate(when)
+			}
+			folder = library.FolderName(opts.Date, publish)
+			targetDir := filepath.Join(opts.MediaRoot, folder)
+			if err := os.MkdirAll(targetDir, 0o755); err != nil {
+				return items, err
+			}
+			target = util.UniquePath(targetDir, name)
 		}
-		folder := library.FolderName(opts.Date, publish)
-		targetDir := filepath.Join(opts.MediaRoot, folder)
-		if err := os.MkdirAll(targetDir, 0o755); err != nil {
-			return items, err
-		}
-		target := util.UniquePath(targetDir, name)
 		if err := moveFile(source, target); err != nil {
 			return items, err
 		}
@@ -235,7 +252,7 @@ func (s *Service) place(opts model.DownloadOptions, staging string) ([]model.Med
 		}
 		items = append(items, item)
 		engines.EventFunc(s.OnEvent)(model.Event{
-			"type": "saved", "folder": folder, "file": item,
+			"type": "saved", "folder": folder, "file": item, "flat": opts.Flat,
 		})
 	}
 	return items, nil
@@ -255,6 +272,13 @@ func moveFile(source, target string) error {
 		return nil
 	}
 	// Запасной вариант — копирование между файловыми системами.
+	if err := copyFile(source, target); err != nil {
+		return err
+	}
+	return os.Remove(source)
+}
+
+func copyFile(source, target string) error {
 	in, err := os.Open(source)
 	if err != nil {
 		return err
@@ -266,12 +290,89 @@ func moveFile(source, target string) error {
 	}
 	if _, err := io.Copy(out, in); err != nil {
 		out.Close()
+		os.Remove(target)
 		return err
 	}
 	if err := out.Close(); err != nil {
+		os.Remove(target)
 		return err
 	}
-	return os.Remove(source)
+	return nil
+}
+
+// RouteResults переносит или копирует готовые файлы в другую папку.
+// sourceRoot — корень библиотеки (от него считаются папки-даты), flat — сложить
+// файлы без структуры дат, move — переместить вместо копирования.
+func RouteResults(results []model.JobResult, sourceRoot, targetRoot string, flat, move bool) (int, error) {
+	sourceRoot = filepath.Clean(sourceRoot)
+	targetRoot = filepath.Clean(targetRoot)
+	if sourceRoot == targetRoot {
+		return 0, fmt.Errorf("источник и назначение совпадают: %s", targetRoot)
+	}
+	if err := os.MkdirAll(targetRoot, 0o755); err != nil {
+		return 0, err
+	}
+	count := 0
+	var firstErr error
+	for ri := range results {
+		for fi := range results[ri].Files {
+			file := &results[ri].Files[fi]
+			sourcePath := file.Path
+			if strings.TrimSpace(sourcePath) == "" {
+				continue
+			}
+			var target string
+			if flat {
+				target = util.UniquePath(targetRoot, filepath.Base(sourcePath))
+			} else {
+				rel, err := filepath.Rel(sourceRoot, sourcePath)
+				if err != nil || rel == "." || rel == ".." ||
+					strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+					rel = filepath.Base(sourcePath)
+				}
+				target = util.UniquePath(filepath.Join(targetRoot, filepath.Dir(rel)), filepath.Base(rel))
+			}
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+				continue
+			}
+			var err error
+			if move {
+				err = moveFile(sourcePath, target)
+			} else {
+				err = copyFile(sourcePath, target)
+			}
+			if err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+				continue
+			}
+			file.Path = target
+			file.Name = filepath.Base(target)
+			count++
+			if move {
+				// Убираем опустевшую папку-дату, но не корень библиотеки
+				// и не каталоги за её пределами.
+				parent := filepath.Dir(sourcePath)
+				if parent != sourceRoot && isWithin(sourceRoot, parent) {
+					_ = os.Remove(parent)
+				}
+			}
+		}
+	}
+	return count, firstErr
+}
+
+// isWithin сообщает, лежит ли path внутри root (или совпадает с ним).
+func isWithin(root, path string) bool {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // summarize считает файлы и их суммарный размер.

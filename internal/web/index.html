@@ -85,6 +85,24 @@
   .empty { color: var(--dim); font-size: 14px; }
   .status-line { font-size: 13px; color: var(--dim); margin-top: 10px; }
   a.plain { color: var(--accent); }
+  .modal {
+    position: fixed; inset: 0; background: rgba(0,0,0,.62); display: none;
+    align-items: center; justify-content: center; z-index: 20;
+  }
+  .modal.open { display: flex; }
+  .modal .box {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    padding: 20px; width: min(580px, 92vw); max-height: 86vh; overflow: auto;
+  }
+  .modal h3 { margin: 0 0 6px; font-size: 16px; }
+  .modal p { margin: 0 0 14px; color: var(--dim); font-size: 13px; }
+  button.dest-btn {
+    display: block; width: 100%; text-align: left; margin-bottom: 8px;
+    background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+    font-weight: 500; padding: 11px 14px;
+  }
+  button.dest-btn:hover { border-color: var(--accent); }
+  button.dest-btn small { display: block; color: var(--dim); font-size: 12px; margin-top: 2px; word-break: break-all; }
 </style>
 </head>
 <body>
@@ -143,9 +161,22 @@ https://www.tiktok.com/@user/stories"></textarea>
   </section>
 </main>
 
+<div class="modal" id="dest-modal">
+  <div class="box">
+    <h3>Куда сохранить скачанное?</h3>
+    <p id="dest-info"></p>
+    <div id="dest-options"></div>
+    <label class="check" style="margin-top:10px"><input type="checkbox" id="dest-copy"> оставить копию в библиотеке</label>
+    <div class="row" style="margin-top:14px">
+      <button class="secondary" id="dest-cancel">Оставить как есть</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const $ = (id) => document.getElementById(id);
 let jobId = null, since = 0, timer = null;
+let meta = null, lastJobId = null, lastResults = null, destAsked = false;
 
 function dateToISO(d) {
   const p = (n) => String(n).padStart(2, '0');
@@ -163,7 +194,7 @@ function logLine(text, cls) {
 }
 
 async function loadMeta() {
-  const meta = await (await fetch('/api/meta')).json();
+  meta = await (await fetch('/api/meta')).json();
   $('ver').textContent = 'версия ' + meta.version;
   $('root').textContent = 'библиотека ' + meta.media_root;
   const missing = ['gallery-dl', 'yt-dlp'].filter((n) => !meta.tools[n]);
@@ -229,6 +260,9 @@ async function start() {
   if (!urls.length) { alert('Вставьте хотя бы одну ссылку'); return; }
   $('log').innerHTML = '';
   since = 0;
+  destAsked = false;
+  lastJobId = null;
+  lastResults = null;
   $('start').disabled = true; $('stop').disabled = false;
   const payload = {
     urls,
@@ -258,9 +292,12 @@ function poll() {
     (data.events || []).forEach(renderEvent);
     if (data.status === 'running') { poll(); }
     else {
+      lastJobId = jobId;
+      lastResults = data.results || [];
       logLine('— завершено —', 'ok');
       resetButtons();
       loadLibrary();
+      maybeAskDestination();
     }
   }, 600);
 }
@@ -309,6 +346,67 @@ async function stop() {
   logLine('запрошена остановка…', 'w');
 }
 
+function maybeAskDestination() {
+  if (destAsked || !meta || !meta.ask_destination) return;
+  if (!lastResults || !lastResults.some((r) => (r.files || []).length > 0)) return;
+  destAsked = true;
+  showDestinationModal();
+}
+
+function addDest(label, sub, handler) {
+  const button = document.createElement('button');
+  button.className = 'dest-btn';
+  const title = document.createElement('span');
+  title.textContent = label;
+  const note = document.createElement('small');
+  note.textContent = sub;
+  button.appendChild(title);
+  button.appendChild(note);
+  button.onclick = handler;
+  $('dest-options').appendChild(button);
+}
+
+function showDestinationModal() {
+  const options = $('dest-options');
+  options.innerHTML = '';
+  $('dest-info').textContent = 'Файлы уже сохранены в ' + meta.media_root + '.';
+  addDest('Оставить в постоянной библиотеке', meta.media_root, closeDestination);
+  for (const [name, path] of Object.entries(meta.storages || {})) {
+    if (path === meta.media_root) continue;
+    addDest(name, path, () => routeDestination({ storage: name }));
+  }
+  addDest('Разовая папка', 'без папок-дат, индекса и архива', () => {
+    const path = prompt('Путь для разовой папки:');
+    if (path) routeDestination({ target: path, flat: true });
+  });
+  addDest('Сделать постоянной другую папку', 'ввести путь', () => {
+    const path = prompt('Новая постоянная папка:');
+    if (path) routeDestination({ target: path, permanent: true });
+  });
+  $('dest-modal').classList.add('open');
+}
+
+function closeDestination() {
+  $('dest-modal').classList.remove('open');
+}
+
+async function routeDestination(payload) {
+  if (!lastJobId) return;
+  const move = !$('dest-copy').checked;
+  const body = Object.assign({ id: lastJobId, move }, payload);
+  const response = await fetch('/api/route', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  const data = await response.json();
+  if (data.error) { logLine('не удалось сохранить: ' + data.error, 'e'); return; }
+  if (data.count) {
+    logLine((move ? 'перемещено' : 'скопировано') + ': ' + data.count + ' файлов → ' + data.target, 'ok');
+  }
+  closeDestination();
+  await loadMeta();
+  loadLibrary();
+}
+
 function resetButtons() {
   $('start').disabled = false; $('stop').disabled = true; jobId = null;
 }
@@ -338,6 +436,7 @@ function escapeHtml(text) {
 $('start').onclick = start;
 $('stop').onclick = stop;
 $('refresh').onclick = loadLibrary;
+$('dest-cancel').onclick = closeDestination;
 $('install').onclick = install;
 $('date').value = dateToISO(new Date());
 loadMeta();

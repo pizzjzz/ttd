@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -40,9 +41,10 @@ type App struct {
 
 // Job — одна задача скачивания, запущенная веб-интерфейсом.
 type Job struct {
-	ID      string
-	URLs    []string
-	Created time.Time
+	ID        string
+	URLs      []string
+	Created   time.Time
+	MediaRoot string
 
 	mu      sync.Mutex
 	status  string
@@ -111,6 +113,7 @@ func (a *App) Routes() *http.ServeMux {
 	mux.HandleFunc("/api/library", a.handleLibrary)
 	mux.HandleFunc("/api/files", a.handleFile)
 	mux.HandleFunc("/api/download", a.handleDownload)
+	mux.HandleFunc("/api/route", a.handleRoute)
 	mux.HandleFunc("/api/job/", a.handleJob)
 	mux.HandleFunc("/api/install", a.handleInstall)
 	mux.HandleFunc("/", a.handleIndex)
@@ -136,16 +139,18 @@ func (a *App) handleMeta(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"version":      version.Version,
-		"media_root":   cfg.MediaPath(),
-		"project_root": config.ProjectRoot(),
-		"date":         util.Today(),
-		"engine":       cfg.Engine,
-		"quality":      cfg.Quality,
-		"stories":      cfg.IncludeStories,
-		"engines":      config.SupportedEngines,
-		"tools":        tools,
-		"versions":     versions,
+		"version":         version.Version,
+		"media_root":      cfg.MediaPath(),
+		"project_root":    config.ProjectRoot(),
+		"date":            util.Today(),
+		"engine":          cfg.Engine,
+		"quality":         cfg.Quality,
+		"stories":         cfg.IncludeStories,
+		"engines":         config.SupportedEngines,
+		"tools":           tools,
+		"versions":        versions,
+		"storages":        cfg.Storages,
+		"ask_destination": cfg.AskDestination,
 	})
 }
 
@@ -208,6 +213,7 @@ func (a *App) handleDownload(w http.ResponseWriter, r *http.Request) {
 	job.cancel = cancel
 
 	cfg := a.config()
+	job.MediaRoot = cfg.MediaPath()
 	if request.Engine != "" {
 		cfg.Engine = request.Engine
 	}
@@ -245,6 +251,97 @@ func (a *App) handleDownload(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	writeJSON(w, http.StatusOK, map[string]any{"id": job.ID, "urls": urls})
+}
+
+type routeRequest struct {
+	ID        string `json:"id"`
+	Storage   string `json:"storage"`
+	Target    string `json:"target"`
+	Flat      bool   `json:"flat"`
+	Permanent bool   `json:"permanent"`
+	Move      bool   `json:"move"`
+}
+
+// handleRoute переносит или копирует готовые файлы в выбранное место.
+func (a *App) handleRoute(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "нужен POST", http.StatusMethodNotAllowed)
+		return
+	}
+	var request routeRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "некорректный JSON: " + err.Error()})
+		return
+	}
+	cfg := a.config()
+	target := ""
+	if request.Storage != "" {
+		path, ok := cfg.StoragePath(request.Storage)
+		if !ok {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "неизвестный профиль: " + request.Storage})
+			return
+		}
+		if info, err := os.Stat(path); err != nil || !info.IsDir() {
+			writeJSON(w, http.StatusBadRequest, map[string]any{
+				"error": fmt.Sprintf("профиль %q: каталог %s не найден (NAS/облако смонтировано?)", request.Storage, path),
+			})
+			return
+		}
+		target = path
+	} else {
+		target = util.ExpandHome(strings.TrimSpace(request.Target))
+		if target == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "не указано назначение"})
+			return
+		}
+		if info, err := os.Stat(target); err != nil || !info.IsDir() {
+			if err := os.MkdirAll(target, 0o755); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]any{"error": "не удалось создать " + target + ": " + err.Error()})
+				return
+			}
+		}
+	}
+	a.mu.Lock()
+	job := a.jobs[request.ID]
+	a.mu.Unlock()
+	if job == nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "задача не найдена"})
+		return
+	}
+
+	job.mu.Lock()
+	if job.status != "done" {
+		job.mu.Unlock()
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "задача ещё не завершена"})
+		return
+	}
+	sourceRoot := job.MediaRoot
+	if sourceRoot == "" {
+		sourceRoot = cfg.MediaPath()
+	}
+	if filepath.Clean(target) == filepath.Clean(sourceRoot) {
+		job.mu.Unlock()
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "count": 0})
+		return
+	}
+	count, routeErr := service.RouteResults(job.results, sourceRoot, target, request.Flat, request.Move)
+	job.mu.Unlock()
+
+	if request.Permanent && routeErr == nil {
+		cfg.MediaRoot = target
+		a.mu.Lock()
+		a.cfg = cfg
+		a.mu.Unlock()
+		if _, err := config.UpdateMediaRoot(target); err != nil {
+			routeErr = fmt.Errorf("файлы обработаны, но настройки не сохранены: %v", err)
+		}
+	}
+
+	payload := map[string]any{"ok": routeErr == nil, "count": count, "target": target}
+	if routeErr != nil {
+		payload["error"] = routeErr.Error()
+	}
+	writeJSON(w, http.StatusOK, payload)
 }
 
 func (a *App) handleJob(w http.ResponseWriter, r *http.Request) {
@@ -355,7 +452,12 @@ func (j *Job) Snapshot(since int) (string, []model.Event, []model.JobResult) {
 	}
 	events := make([]model.Event, len(j.events)-since)
 	copy(events, j.events[since:])
-	return j.status, events, j.results
+	results := make([]model.JobResult, len(j.results))
+	for i, result := range j.results {
+		results[i] = result
+		results[i].Files = append([]model.MediaItem(nil), result.Files...)
+	}
+	return j.status, events, results
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

@@ -97,6 +97,7 @@ type DownloadOptions struct {
 	DryRun             bool
 	Verbose            bool
 	NoArchive          bool
+	Flat               bool // разовая папка: сохранять без папок-дат и архива
 	ExtraArgs          []string
 }
 

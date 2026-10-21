@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -17,31 +18,35 @@ var SupportedEngines = []string{"auto", "gallery-dl", "yt-dlp", "mock"}
 
 // Config — настройки приложения.
 type Config struct {
-	MediaRoot          string `json:"media_root"`
-	Engine             string `json:"engine"`
-	Quality            string `json:"quality"`
-	Cookies            string `json:"cookies"`
-	CookiesFromBrowser string `json:"cookies_from_browser"`
-	IncludeStories     bool   `json:"include_stories"`
-	Host               string `json:"host"`
-	Port               int    `json:"port"`
-	OpenBrowser        bool   `json:"open_browser"`
-	DownloadLimit      int    `json:"download_limit"`
-	GalleryDL          string `json:"gallery_dl"`
-	YtDlp              string `json:"yt_dlp"`
-	UseArchive         bool   `json:"use_archive"`
+	MediaRoot          string            `json:"media_root"`
+	Engine             string            `json:"engine"`
+	Quality            string            `json:"quality"`
+	Cookies            string            `json:"cookies"`
+	CookiesFromBrowser string            `json:"cookies_from_browser"`
+	IncludeStories     bool              `json:"include_stories"`
+	Host               string            `json:"host"`
+	Port               int               `json:"port"`
+	OpenBrowser        bool              `json:"open_browser"`
+	DownloadLimit      int               `json:"download_limit"`
+	GalleryDL          string            `json:"gallery_dl"`
+	YtDlp              string            `json:"yt_dlp"`
+	UseArchive         bool              `json:"use_archive"`
+	AskDestination     bool              `json:"ask_destination"`
+	Storages           map[string]string `json:"storages,omitempty"`
 }
 
 // Default возвращает настройки по умолчанию.
 func Default() Config {
 	return Config{
-		MediaRoot:   DefaultMediaRoot(),
-		Engine:      "auto",
-		Quality:     "best",
-		Host:        "127.0.0.1",
-		Port:        8787,
-		OpenBrowser: true,
-		UseArchive:  true,
+		MediaRoot:      DefaultMediaRoot(),
+		Engine:         "auto",
+		Quality:        "best",
+		Host:           "127.0.0.1",
+		Port:           8787,
+		OpenBrowser:    true,
+		UseArchive:     true,
+		AskDestination: true,
+		Storages:       map[string]string{},
 	}
 }
 
@@ -102,20 +107,36 @@ func ConfigFile() string {
 	return filepath.Join(base, "ttd", "config.json")
 }
 
-// Load читает файл настроек и применяет переменные окружения.
-func Load() Config {
+// LoadFile читает файл настроек, не применяя переменные окружения.
+func LoadFile() Config {
 	cfg := Default()
 	if data, err := os.ReadFile(ConfigFile()); err == nil {
 		// Заполняем поверх значений по умолчанию.
 		_ = json.Unmarshal(data, &cfg)
 	}
+	cfg.normalize()
+	return cfg
+}
+
+// Load читает файл настроек и применяет переменные окружения.
+func Load() Config {
+	cfg := LoadFile()
 	applyEnv(&cfg)
 	cfg.normalize()
 	return cfg
 }
 
+// UpdateMediaRoot записывает в файл только media_root. Значения из
+// переменных окружения и флагов командной строки в файл не попадают.
+func UpdateMediaRoot(root string) (string, error) {
+	cfg := LoadFile()
+	cfg.MediaRoot = util.ExpandHome(root)
+	return Save(cfg)
+}
+
 // Save записывает настройки в файл.
 func Save(cfg Config) (string, error) {
+	cfg.normalize()
 	path := ConfigFile()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return path, err
@@ -145,6 +166,68 @@ func (c *Config) normalize() {
 	if c.Port == 0 {
 		c.Port = 8787
 	}
+	storages := make(map[string]string, len(c.Storages))
+	for name, path := range c.Storages {
+		cleanName := strings.TrimSpace(name)
+		cleanPath := strings.TrimSpace(util.ExpandHome(path))
+		if cleanName == "" || cleanPath == "" {
+			continue
+		}
+		if abs, err := filepath.Abs(cleanPath); err == nil {
+			cleanPath = abs
+		}
+		storages[cleanName] = cleanPath
+	}
+	c.Storages = storages
+}
+
+// ReservedStorageNames — имена, которые нельзя использовать для профилей.
+var ReservedStorageNames = map[string]bool{
+	"local": true, "library": true, "temp": true, "once": true, "ask": true,
+}
+
+// ValidStorageName проверяет имя профиля назначения.
+func ValidStorageName(name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" || ReservedStorageNames[strings.ToLower(name)] {
+		return false
+	}
+	for _, r := range name {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' ||
+			r == '-' || r == '_' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// StorageNames возвращает имена профилей по алфавиту.
+func (c Config) StorageNames() []string {
+	names := make([]string, 0, len(c.Storages))
+	for name := range c.Storages {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// StoragePath возвращает путь профиля. local/library — постоянная библиотека.
+func (c Config) StoragePath(name string) (string, bool) {
+	name = strings.TrimSpace(name)
+	switch strings.ToLower(name) {
+	case "local", "library":
+		return c.MediaPath(), true
+	}
+	if path, ok := c.Storages[name]; ok {
+		return util.ExpandHome(path), true
+	}
+	for candidate, path := range c.Storages {
+		if strings.EqualFold(candidate, name) {
+			return util.ExpandHome(path), true
+		}
+	}
+	return "", false
 }
 
 // MediaPath — абсолютный путь к библиотеке.
@@ -265,6 +348,9 @@ func applyEnv(cfg *Config) {
 	}
 	if v, ok := os.LookupEnv("TTD_ARCHIVE"); ok {
 		cfg.UseArchive = parseBool(v)
+	}
+	if v, ok := os.LookupEnv("TTD_ASK_DESTINATION"); ok {
+		cfg.AskDestination = parseBool(v)
 	}
 }
 

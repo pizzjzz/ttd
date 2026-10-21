@@ -177,3 +177,9 @@ func ExpandHome(path string) string {
 	}
 	return path
 }
+
+// IsTerminal сообщает, подключён ли стандартный ввод к терминалу.
+func IsTerminal() bool {
+	info, err := os.Stdin.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
+}

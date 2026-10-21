@@ -163,3 +163,109 @@ func contains(haystack, needle string) bool {
 		return false
 	})()
 }
+
+func TestPlaceFlat(t *testing.T) {
+	cfg := testConfig(t)
+	svc := New(cfg, nil)
+	staging := filepath.Join(cfg.MediaPath(), StagingDirName, "job-flat")
+	if err := os.MkdirAll(staging, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(staging, "clip.mp4"), []byte("media"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	items, err := svc.place(model.DownloadOptions{
+		MediaRoot: cfg.MediaPath(), Date: "19.10.2026", Flat: true,
+	}, staging)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("ожидался 1 файл, получено %d", len(items))
+	}
+	if items[0].Path != filepath.Join(cfg.MediaPath(), "clip.mp4") {
+		t.Fatalf("файл разложен не туда: %s", items[0].Path)
+	}
+	if folders := library.ListFolders(cfg.MediaPath()); len(folders) != 0 {
+		t.Fatalf("в разовой папке не должно быть папок-дат: %+v", folders)
+	}
+}
+
+func TestRouteResultsMoveLibrary(t *testing.T) {
+	source := t.TempDir()
+	target := t.TempDir()
+	folder := "19.10.2026 | 17.10.2026"
+	if err := os.MkdirAll(filepath.Join(source, folder), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(source, folder, "clip.mp4")
+	if err := os.WriteFile(file, []byte("media"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	results := []model.JobResult{{Status: model.StatusOK, Files: []model.MediaItem{{Path: file, Name: "clip.mp4"}}}}
+
+	count, err := RouteResults(results, source, target, false, true)
+	if err != nil || count != 1 {
+		t.Fatalf("count=%d err=%v", count, err)
+	}
+	moved := filepath.Join(target, folder, "clip.mp4")
+	if _, err := os.Stat(moved); err != nil {
+		t.Fatalf("файл не перенесён: %v", err)
+	}
+	if _, err := os.Stat(file); !os.IsNotExist(err) {
+		t.Fatalf("исходный файл остался: %v", err)
+	}
+	if results[0].Files[0].Path != moved {
+		t.Fatalf("путь результата не обновлён: %s", results[0].Files[0].Path)
+	}
+	if _, err := os.Stat(filepath.Join(source, folder)); !os.IsNotExist(err) {
+		t.Fatalf("опустевшая папка-дата должна быть удалена: %v", err)
+	}
+}
+
+func TestRouteResultsKeepsParentOutsideLibrary(t *testing.T) {
+	source := t.TempDir()
+	target := t.TempDir()
+	outside := t.TempDir()
+	file := filepath.Join(outside, "clip.mp4")
+	if err := os.WriteFile(file, []byte("media"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	results := []model.JobResult{{Status: model.StatusOK, Files: []model.MediaItem{{Path: file, Name: "clip.mp4"}}}}
+
+	count, err := RouteResults(results, source, target, false, true)
+	if err != nil || count != 1 {
+		t.Fatalf("count=%d err=%v", count, err)
+	}
+	if _, err := os.Stat(outside); err != nil {
+		t.Fatalf("каталог за пределами библиотеки удалён: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(target, "clip.mp4")); err != nil {
+		t.Fatalf("файл не перенесён: %v", err)
+	}
+}
+
+func TestRouteResultsCopyFlat(t *testing.T) {
+	source := t.TempDir()
+	target := t.TempDir()
+	file := filepath.Join(source, "clip.mp4")
+	if err := os.WriteFile(file, []byte("media"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	results := []model.JobResult{{Status: model.StatusOK, Files: []model.MediaItem{{Path: file, Name: "clip.mp4"}}}}
+
+	count, err := RouteResults(results, source, target, true, false)
+	if err != nil || count != 1 {
+		t.Fatalf("count=%d err=%v", count, err)
+	}
+	if _, err := os.Stat(filepath.Join(target, "clip.mp4")); err != nil {
+		t.Fatalf("файл не скопирован: %v", err)
+	}
+	if _, err := os.Stat(file); err != nil {
+		t.Fatalf("исходный файл должен остаться: %v", err)
+	}
+	if _, err := RouteResults(results, source, source, true, false); err == nil {
+		t.Fatal("перенос в тот же каталог должен быть отклонён")
+	}
+}

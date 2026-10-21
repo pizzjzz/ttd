@@ -237,6 +237,34 @@ ttd --engine mock --dir /tmp/ttd-demo "https://www.tiktok.com/@user/video/123"
 ttd list --dir /tmp/ttd-demo --files
 ```
 
+### Куда сохранять: NAS, облако или разовая папка
+
+`ttd` пишет в смонтированные каталоги, поэтому NAS (SMB/NFS), sshfs и папка
+синхронизации Nextcloud/ownCloud подходят без отдельной настройки протоколов.
+
+```bash
+# профиль для NAS или облака
+ttd config --add-storage nas=/mnt/nas/ttd
+ttd config --add-storage cloud=~/Nextcloud/ttd
+
+# сохранить сразу в профиль
+ttd --to nas "https://www.tiktok.com/@user/video/7412345678901234567"
+
+# сделать папку постоянной библиотекой
+ttd config --set-dir /mnt/nas/ttd
+
+# разовая папка: без дат, индекса и архива
+ttd --temp /tmp/ttd-oneoff "https://www.tiktok.com/@user/video/7412345678901234567"
+```
+
+Если запустить `ttd` в терминале без `--to/--temp/--dir`, после загрузки
+появится вопрос, куда сохранить файлы (оставить, профиль, разовая папка,
+сделать постоянной). В TUI и на сайте этот выбор показывается автоматически.
+Отключить: `ttd --no-ask` или `ttd config --no-ask-destination`.
+
+Если каталог профиля не существует (NAS не смонтирован), `ttd` сообщит об
+ошибке и не станет создавать пустую локальную папку.
+
 Посмотреть, что доступно, не скачивая:
 
 ```bash
@@ -252,6 +280,8 @@ ttd probe "https://www.tiktok.com/@user/video/7412345678901234567"
 ```bash
 ttd <ссылка> [ещё ссылки…]
 ttd --stories "https://www.tiktok.com/@user"   # профиль + истории
+ttd --to nas <ссылка>                           # сразу на NAS/в облако
+ttd --temp /tmp/ttd-oneoff <ссылка>             # разовая папка
 ttd list --files                                # что уже скачано
 ```
 

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"sort"
+	"strings"
 	"syscall"
 
 	"ttd/internal/config"
@@ -73,6 +74,9 @@ func Run(ctx context.Context, args []string) int {
 // commonFlags — флаги, общие для скачивания, веб-сервера и TUI.
 type commonFlags struct {
 	dir                string
+	to                 string
+	temp               string
+	askDest            bool
 	engine             string
 	quality            string
 	cookies            string
@@ -88,6 +92,7 @@ type commonFlags struct {
 
 func registerCommon(fs *flagSet, cf *commonFlags) {
 	fs.String(&cf.dir, "dir", "d", "output")
+	fs.BoolPair(&cf.askDest, "ask", "no-ask")
 	fs.String(&cf.engine, "engine", "e")
 	fs.String(&cf.quality, "quality", "q")
 	fs.String(&cf.cookies, "cookies")
@@ -104,6 +109,9 @@ func registerCommon(fs *flagSet, cf *commonFlags) {
 func (cf *commonFlags) apply(cfg *config.Config, fs *flagSet) {
 	if fs.Changed("dir") {
 		cfg.MediaRoot = util.ExpandHome(cf.dir)
+	}
+	if fs.Changed("ask") || fs.Changed("no-ask") {
+		cfg.AskDestination = cf.askDest
 	}
 	if fs.Changed("engine") {
 		cfg.Engine = cf.engine
@@ -138,6 +146,8 @@ func cmdDownload(ctx context.Context, args []string) int {
 	fs := newFlagSet("download")
 	var cf commonFlags
 	registerCommon(fs, &cf)
+	fs.String(&cf.to, "to")
+	fs.String(&cf.temp, "temp", "once")
 	var dryRun, audioOnly, installNow bool
 	fs.Bool(&dryRun, "dry-run", "plan")
 	fs.Bool(&audioOnly, "audio-only", "audio")
@@ -158,6 +168,42 @@ func cmdDownload(ctx context.Context, args []string) int {
 	}
 
 	cfg := loadConfigWith(&cf, fs)
+
+	if fs.Changed("temp") && strings.TrimSpace(cf.temp) == "" {
+		errorf("пустой путь для --temp")
+		return 2
+	}
+	if fs.Changed("to") && strings.TrimSpace(cf.to) == "" {
+		errorf("пустой путь для --to")
+		return 2
+	}
+	if cf.to != "" && cf.temp != "" {
+		errorf("нельзя одновременно --to и --temp")
+		return 2
+	}
+	if fs.Changed("dir") && (cf.to != "" || cf.temp != "") {
+		errorf("нельзя одновременно --dir и --to/--temp")
+		return 2
+	}
+	flat := false
+	if cf.temp != "" {
+		cfg.MediaRoot = util.ExpandHome(cf.temp)
+		flat = true
+	}
+	if cf.to != "" {
+		path, named, err := resolveDestination(&cfg, cf.to)
+		if err != nil {
+			errorf("%v", err)
+			return 2
+		}
+		if named {
+			if info, err := os.Stat(path); err != nil || !info.IsDir() {
+				errorf("профиль %q: каталог %s не найден (NAS/облако смонтировано?)", cf.to, path)
+				return 2
+			}
+		}
+		cfg.MediaRoot = path
+	}
 
 	if installNow {
 		if _, err := installer.BootstrapAll(ctx, &cfg); err != nil {
@@ -183,8 +229,12 @@ func cmdDownload(ctx context.Context, args []string) int {
 		AudioOnly:          audioOnly,
 		DryRun:             dryRun,
 		Verbose:            cf.verbose,
-		NoArchive:          !cfg.UseArchive,
+		NoArchive:          !cfg.UseArchive || flat,
+		Flat:               flat,
 		ExtraArgs:          engineArgs,
+	}
+	if flat {
+		opts.CacheDir = ""
 	}
 
 	var handler func(model.Event)
@@ -200,6 +250,13 @@ func cmdDownload(ctx context.Context, args []string) int {
 	}
 	fmt.Println()
 	fmt.Println(service.FormatDone(results))
+
+	if !flat && cf.to == "" && !fs.Changed("dir") && cfg.AskDestination &&
+		!cf.quiet && !dryRun && util.IsTerminal() && hasFiles(results) {
+		if err := promptDestination(&cfg, opts.MediaRoot, results); err != nil {
+			errorf("%v", err)
+		}
+	}
 	return exitCode(ctx, results)
 }
 
@@ -401,18 +458,98 @@ func cmdDoctor(args []string) int {
 func cmdConfig(args []string) int {
 	fs := newFlagSet("config")
 	var pathOnly bool
+	var setDir string
+	var addStorages, removeStorages []string
+	var askDest bool
+	var help bool
 	fs.Bool(&pathOnly, "path")
+	fs.String(&setDir, "set-dir", "set-media-root")
+	fs.List(&addStorages, "add-storage")
+	fs.List(&removeStorages, "remove-storage")
+	fs.BoolPair(&askDest, "ask-destination", "no-ask-destination")
+	fs.Bool(&help, "help", "h")
 	if err := fs.parse(args); err != nil {
 		errorf("%v", err)
 		return 2
+	}
+	if help {
+		printConfigHelp()
+		return 0
 	}
 	path := config.ConfigFile()
 	if pathOnly {
 		fmt.Println(path)
 		return 0
 	}
-	fmt.Println("# файл настроек: " + path)
+
 	cfg := config.Load()
+	fileCfg := config.LoadFile()
+	if cfg.Storages == nil {
+		cfg.Storages = map[string]string{}
+	}
+	if fileCfg.Storages == nil {
+		fileCfg.Storages = map[string]string{}
+	}
+	// Изменения применяем к эффективным настройкам (для показа) и к тому,
+	// что лежит в файле (для сохранения без значений из env и флагов).
+	apply := func(change func(*config.Config)) {
+		change(&cfg)
+		change(&fileCfg)
+	}
+	changed := false
+	if fs.Changed("set-dir") || fs.Changed("set-media-root") {
+		value := strings.TrimSpace(setDir)
+		if value == "" {
+			errorf("пустой путь для --set-dir")
+			return 2
+		}
+		path := util.ExpandHome(value)
+		apply(func(c *config.Config) { c.MediaRoot = path })
+		changed = true
+	}
+	for _, spec := range addStorages {
+		name, value, ok := strings.Cut(spec, "=")
+		if !ok {
+			errorf("ожидалось имя=путь, получено %q", spec)
+			return 2
+		}
+		name = strings.TrimSpace(name)
+		value = strings.TrimSpace(value)
+		if !config.ValidStorageName(name) {
+			errorf("недопустимое имя профиля %q (разрешены латиница, цифры, - и _)", name)
+			return 2
+		}
+		if value == "" {
+			errorf("пустой путь для профиля %q", name)
+			return 2
+		}
+		path := util.ExpandHome(value)
+		apply(func(c *config.Config) { c.Storages[name] = path })
+		changed = true
+	}
+	for _, name := range removeStorages {
+		name = strings.TrimSpace(name)
+		if _, ok := fileCfg.Storages[name]; !ok {
+			errorf("профиль %q не найден", name)
+			return 2
+		}
+		apply(func(c *config.Config) { delete(c.Storages, name) })
+		changed = true
+	}
+	if fs.Changed("ask-destination") || fs.Changed("no-ask-destination") {
+		apply(func(c *config.Config) { c.AskDestination = askDest })
+		changed = true
+	}
+	if changed {
+		saved, err := config.Save(fileCfg)
+		if err != nil {
+			errorf("не удалось сохранить настройки: %v", err)
+			return 1
+		}
+		fmt.Println("# сохранено: " + saved)
+		cfg = config.Load()
+	}
+	fmt.Println("# файл настроек: " + path)
 	data, _ := json.MarshalIndent(cfg, "", "  ")
 	fmt.Println(string(data))
 	return 0
@@ -538,6 +675,9 @@ func printDownloadHelp() {
 
 Флаги:
   -d, --dir <путь>            каталог библиотеки (по умолчанию ~/ttd)
+      --to <имя|путь>         профиль (NAS/облако) или папка для сохранения
+      --temp <путь>           разовая папка: без дат, индекса и архива
+      --ask / --no-ask        спрашивать, куда сохранить, после загрузки
   -e, --engine <движок>       auto | gallery-dl | yt-dlp | mock
   -q, --quality <качество>    best | 1080 | 720 | 480 (по умолчанию best)
       --date <ДД.ММ.ГГГГ>     дата скачивания для папки (по умолчанию сегодня)
@@ -557,6 +697,18 @@ func printDownloadHelp() {
   -v, --verbose               подробный журнал
   -Q, --quiet                 без промежуточного вывода
   -h, --help                  эта справка
+
+Куда сохраняется:
+  по умолчанию — постоянная библиотека (~/ttd): папки-даты и архив повторов.
+  --to nas — профиль из настроек или явный путь; пишет сразу туда.
+  --temp /path — разовая папка: файлы без папок-дат, индекса и архива.
+  После загрузки ttd может спросить, куда сохранить; --no-ask отключает вопрос.
+
+Профили для смонтированных NAS и облака:
+  ttd config --add-storage nas=/mnt/nas/ttd
+  ttd config --add-storage cloud=/mnt/nextcloud/ttd
+  ttd config --set-dir /mnt/nas/ttd     # сделать постоянной
+  ttd config --remove-storage nas
 `)
 }
 
@@ -576,5 +728,27 @@ func printInstallHelp() {
   ttd install
   ttd install --online
   ttd install --wheels ~/ttd-wheels
+`)
+}
+
+func printConfigHelp() {
+	fmt.Print(`ttd config — настройки и профили назначения
+
+Без флагов показывает текущие настройки и путь к config.json.
+
+Флаги:
+      --set-dir <путь>            сделать папку постоянной библиотекой
+      --add-storage <имя=путь>    добавить профиль (NAS, облако); можно повторять
+      --remove-storage <имя>      удалить профиль
+      --ask-destination           спрашивать, куда сохранить, после загрузки
+      --no-ask-destination        не спрашивать
+      --path                      показать только путь к файлу настроек
+  -h, --help                      эта справка
+
+Примеры:
+  ttd config --set-dir /mnt/nas/ttd
+  ttd config --add-storage nas=/mnt/nas/ttd
+  ttd config --add-storage cloud=/mnt/nextcloud/ttd
+  ttd config --remove-storage nas
 `)
 }
