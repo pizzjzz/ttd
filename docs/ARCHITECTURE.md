@@ -64,7 +64,8 @@
 | `internal/engines` | классификация ссылок, команды движков, метаданные, зондирование |
 | `internal/service` | оркестрация загрузки: staging → определение дат → раскладка |
 | `internal/library` | чтение библиотеки, имена папок-дат |
-| `internal/installer` | установка движков в окружение, диагностика |
+| `internal/installer` | установка встроенных движков в окружение, диагностика |
+| `internal/installer/wheels` | встроенные `.whl`: gallery-dl, yt-dlp и зависимости |
 | `internal/tui` | полноэкранный интерфейс, raw-режим терминала |
 | `internal/web` | HTTP-сервер и одностраничный интерфейс |
 | `internal/version` | версия приложения |
@@ -188,6 +189,30 @@ yt-dlp --no-colors --newline --no-simulate \
 
 Строка прогресса помечается префиксом `TTD-PROGRESS`, чтобы её было легко
 отличить от обычного вывода.
+
+### Установка без интернета
+
+Пакеты движков лежат в `internal/installer/wheels` и встраиваются в бинарник
+через `//go:embed wheels/*.whl`. Все колёса — чистый Python (`py3-none-any`),
+поэтому один набор подходит для Linux, macOS и Windows.
+
+`installer.Bootstrap`:
+
+1. проверяет Python (нужен 3.10+ — требование yt-dlp);
+2. создаёт venv (`python -m venv`), pip берётся из `ensurepip` — без сети;
+3. распаковывает встроенные колёса во временный каталог;
+4. запускает `pip install --no-index --find-links <каталог> --only-binary=:all:
+   gallery-dl yt-dlp`;
+5. удаляет временный каталог.
+
+Флаги `ttd install`:
+
+- без флагов — встроенный набор (офлайн);
+- `--online` — `pip install --upgrade` с PyPI;
+- `--wheels <каталог>` — офлайн-установка из своих колёс.
+
+`installer.BundledVersions()` разбирает имена колёс и показывает версии в
+`ttd doctor`.
 
 ---
 

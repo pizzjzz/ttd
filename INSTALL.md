@@ -12,8 +12,11 @@
 | Компонент | Версия | Зачем |
 | --- | --- | --- |
 | **Go** | 1.22 или новее | собрать саму программу `ttd` |
-| **Python** | 3.9 или новее | для движков загрузки (gallery-dl, yt-dlp) |
-| Интернет | — | для загрузки движков и самих видео |
+| **Python** | 3.10 или новее | для движков загрузки (gallery-dl, yt-dlp) |
+| Интернет | — | только для самих видео и необязательного `ttd install --online` |
+
+Движки `gallery-dl` и `yt-dlp` вместе с их Python-зависимостями уже встроены в
+исходники и бинарник, поэтому для установки движков интернет **не нужен**.
 
 Проверить, что уже установлено:
 
@@ -122,7 +125,7 @@ Git Bash:
 2. собирает бинарник из `./cmd/ttd` (`ttd` или `ttd.exe`);
 3. копирует его в `~/.local/bin` (Windows: `%USERPROFILE%\.local\bin`);
 4. запускает `ttd install` — создаёт отдельное окружение и ставит в него
-   `gallery-dl` и `yt-dlp`:
+   `gallery-dl` и `yt-dlp` из встроенного набора (интернет не нужен):
    `~/.local/share/ttd/venv` на Linux/macOS, `%APPDATA%\ttd\venv` на Windows;
 5. добавляет каталог с бинарником в PATH: `~/.bashrc` и `~/.zshrc` на
    Linux/macOS, PATH пользователя на Windows.
@@ -190,13 +193,15 @@ ttd doctor
 кэш библиотеки:    /home/user/ttd/.ttd-cache
 python:            /usr/bin/python3
 виртуальное окр.:  /home/user/.local/share/ttd/venv (есть)
+встроенные движки: gallery-dl 1.32.17, yt-dlp 2026.8.19 (без интернета)
 gallery-dl: /home/user/.local/share/ttd/venv/bin/gallery-dl — 1.32.17
 yt-dlp: /home/user/.local/share/ttd/venv/bin/yt-dlp — 2026.08.19
 поддерживаемые движки: auto, gallery-dl, yt-dlp, mock
 ```
 
-Строки `gallery-dl` и `yt-dlp` должны содержать версии. Если вместо этого
-написано «не найден» — повторите `ttd install`.
+Строки `gallery-dl` и `yt-dlp` должны содержать версии. Строка «встроенные
+движки» показывает набор, который поставляется с бинарником. Если движки не
+установлены — повторите `ttd install` (интернет не потребуется).
 
 В Windows тот же вывод будет содержать пути `C:\Users\…\AppData\…`, а движки —
 `…\venv\Scripts\gallery-dl.exe` и `…\yt-dlp.exe`. Это нормально.
@@ -326,8 +331,14 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 Если исходники уже удалены, а обновлять нужно только движки:
 
 ```bash
-ttd install
+ttd install              # из встроенного набора, без интернета
+ttd install --online     # свежие версии с PyPI (нужен интернет)
+ttd install --wheels ~/ttd-wheels   # офлайн из своих колёс
 ```
+
+Важно: `ttd install --online` заменяет встроенные версии более свежими — это
+первое, что стоит попробовать, если TikTok перестал скачиваться после
+очередного изменения сайта.
 
 ---
 
@@ -395,8 +406,12 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 перейдёт в построчный режим — загрузка при этом работает.
 
 **Windows: «не найден python3» при `ttd install`**
-Установите Python 3.9+ (`winget install Python.Python.3.12`) и откройте новый
+Установите Python 3.10+ (`winget install Python.Python.3.12`) и откройте новый
 терминал. Установщик ищет `python3`, `python` и `py`.
+
+**`нужен Python 3.10 или новее`**
+Встроенный yt-dlp требует Python 3.10+. Обновите Python; на Windows это
+`winget upgrade Python.Python.3.12`.
 
 **`ttd` работает, но «движки не найдены» после переноса каталога**
 Движки ищутся в каталоге данных: `~/.local/share/ttd/venv` на Linux/macOS,
@@ -415,8 +430,10 @@ PATH="$HOME/.local/go/bin:$PATH" ./install.sh
 См. пункт 2. Если Go установлен в `~/.local/go`, добавьте его в `PATH`.
 
 **`не удалось создать окружение` / движки не ставятся**
-Проверьте наличие Python и доступ в интернет:
-`python3 -m venv --help` и `python3 -m pip --version`.
+Проверьте, что Python 3.10+ и модуль `venv` доступны:
+`python3 -m venv --help` и `python3 -m pip --version`. Интернет для установки
+движков не нужен — они встроены; если нужна свежая версия, выполните
+`ttd install --online`.
 
 **TikTok отвечает `403` или «Unable to download webpage»**
 Возьмите cookies из браузера:
@@ -426,7 +443,8 @@ ttd --cookies-from-browser firefox "https://www.tiktok.com/@user/video/…"
 ```
 
 **Видео скачивается без звука**
-Обновите yt-dlp (`ttd install`) — старые версии иногда теряют аудиодорожку.
+Обновите yt-dlp (`ttd install --online`) — старые версии иногда теряют
+аудиодорожку. Если интернета нет, используйте `ttd install --wheels <каталог>`.
 
 **Истории не качаются**
 Добавьте флаг `--stories` или укажите ссылку `…/@user/stories` напрямую.

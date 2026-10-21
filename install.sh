@@ -79,6 +79,9 @@ usage() {
 Переменные окружения:
   TTD_BIN_DIR, TTD_DATA_DIR — то же, что --bin-dir и --data-dir.
 
+Движки gallery-dl и yt-dlp встроены в бинарник: для их установки интернет
+не нужен. Обновить их можно позже командой: ttd install --online
+
 Windows:
   В Git Bash скрипт ставит ttd.exe и настраивает bash. Для cmd и PowerShell
   используйте native-установщик:  powershell -ExecutionPolicy Bypass -File install.ps1
@@ -245,7 +248,7 @@ DATA_DIR_NATIVE="$(native_path "$DATA_DIR")"
 # --------------------------------------------------------------------------
 ENGINES_OK=1
 if [ "$WITH_ENGINES" = 1 ]; then
-  echo "==> Устанавливаю движки (gallery-dl, yt-dlp) в $DATA_DIR/venv"
+  echo "==> Устанавливаю движки из встроенного набора (без интернета) в $DATA_DIR/venv"
   if ! TTD_DATA_DIR="$DATA_DIR_NATIVE" "$BIN_DIR/ttd$EXE" install; then
     ENGINES_OK=0
     echo "ttd: движки установить не удалось. Программа установлена," >&2

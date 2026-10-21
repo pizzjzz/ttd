@@ -342,17 +342,30 @@ func cmdWeb(ctx context.Context, args []string) int {
 func cmdInstall(ctx context.Context, args []string) int {
 	fs := newFlagSet("install")
 	var dir string
+	var online bool
+	var wheelsDir string
+	var help bool
 	fs.String(&dir, "dir", "d")
+	fs.Bool(&online, "online")
+	fs.String(&wheelsDir, "wheels")
+	fs.Bool(&help, "help", "h")
 	if err := fs.parse(args); err != nil {
 		errorf("%v", err)
 		return 2
+	}
+	if help {
+		printInstallHelp()
+		return 0
 	}
 	cfg := config.Load()
 	if dir != "" {
 		cfg.MediaRoot = util.ExpandHome(dir)
 	}
 	reporter := NewReporter(os.Stdout, true, false)
-	if err := installer.Bootstrap(ctx, &cfg, reporter.Handle); err != nil {
+	if err := installer.BootstrapWith(ctx, &cfg, reporter.Handle, installer.Options{
+		Online:    online,
+		WheelsDir: wheelsDir,
+	}); err != nil {
 		errorf("установка не удалась: %v", err)
 		return 1
 	}
@@ -502,7 +515,7 @@ func printUsage() {
   ttd list [--files]                    показать библиотеку
   ttd tui                               текстовый интерфейс
   ttd web [--port 8787]                 поднять сайт на localhost
-  ttd install                           установить движки (gallery-dl, yt-dlp)
+  ttd install                           поставить движки (встроены, без интернета)
   ttd doctor                            проверить окружение
   ttd config                            показать настройки
   ttd version                           версия
@@ -539,9 +552,29 @@ func printDownloadHelp() {
       --engine-arg <аргумент> дополнительный аргумент движка (можно повторять)
       --dry-run, --plan       показать план без скачивания
       --install               принудительно переустановить движки
+                              (из встроенного набора, без интернета)
   -j, --json                  вывести результат в JSON
   -v, --verbose               подробный журнал
   -Q, --quiet                 без промежуточного вывода
   -h, --help                  эта справка
+`)
+}
+
+func printInstallHelp() {
+	fmt.Print(`ttd install — установка движков (gallery-dl, yt-dlp)
+
+По умолчанию движки и их зависимости ставятся из встроенного набора:
+интернет для этого не нужен. Уже установленное окружение не пересоздаётся.
+
+Флаги:
+      --online                обновить движки с PyPI (нужен интернет)
+      --wheels <каталог>      поставить из локального каталога с .whl
+  -d, --dir <путь>            каталог библиотеки
+  -h, --help                  эта справка
+
+Примеры:
+  ttd install
+  ttd install --online
+  ttd install --wheels ~/ttd-wheels
 `)
 }

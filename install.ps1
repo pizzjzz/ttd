@@ -4,7 +4,8 @@
 
 .DESCRIPTION
     Собирает ttd.exe, ставит его в каталог пользователя, добавляет этот каталог
-    в PATH и устанавливает движки gallery-dl и yt-dlp в отдельное окружение.
+    в PATH и устанавливает движки gallery-dl и yt-dlp из встроенного набора
+    (интернет для этого не нужен) в отдельное окружение.
     После установки команда ttd работает из cmd, PowerShell и Windows Terminal
     независимо от того, где лежат исходники.
 
@@ -186,7 +187,7 @@ if ($NoEngines) {
     Write-Step 'Движки пропущены (-NoEngines)'
 }
 else {
-    Write-Step "Устанавливаю движки (gallery-dl, yt-dlp) в $Venv"
+    Write-Step "Устанавливаю встроенные движки (без интернета) в $Venv"
     $env:TTD_DATA_DIR = $DataDir
     & $Exe install
     if ($LASTEXITCODE -ne 0) {
