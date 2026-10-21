@@ -1,8 +1,9 @@
 # Установка и запуск ttd
 
 Пошаговая инструкция: от чистого компьютера до первой скачанной ссылки.
-Поддерживаются Linux и macOS (на Windows возможен запуск, но TUI работает в
-упрощённом режиме).
+Поддерживаются **Linux**, **macOS** и **Windows 10/11**. На всех трёх
+платформах работают CLI, TUI и локальный сайт; отличается только способ
+установки.
 
 ---
 
@@ -18,12 +19,12 @@
 
 ```bash
 go version
-python3 --version
+python3 --version     # Windows: python --version
 ```
 
 Если Go не найден — переходите к пункту 2. Если Python не найден — установите
-его пакетным менеджером (`sudo dnf install python3`, `sudo apt install python3`
-и так далее).
+его пакетным менеджером (`sudo dnf install python3`, `sudo apt install python3`,
+`brew install python` на macOS, `winget install Python.Python.3.12` на Windows).
 
 ---
 
@@ -40,6 +41,12 @@ sudo apt update && sudo apt install golang-go
 
 # Arch
 sudo pacman -S go
+
+# macOS (Homebrew)
+brew install go
+
+# Windows (PowerShell)
+winget install GoLang.Go
 ```
 
 ### Вариант Б. Без прав root, в домашний каталог
@@ -65,6 +72,9 @@ echo 'export PATH="$HOME/.local/go/bin:$PATH"' >> ~/.bashrc
 
 > Для macOS во втором варианте замените имя файла на `…darwin-arm64.tar.gz`
 > (Apple Silicon) или `…darwin-amd64.tar.gz` (Intel).
+>
+> На Windows проще всего `winget install GoLang.Go` или установщик с
+> <https://go.dev/dl/>; после установки откройте новый терминал.
 
 ---
 
@@ -85,42 +95,61 @@ cd ~/ttd
 
 ## 4. Установка одной командой
 
+### Linux и macOS
+
 ```bash
 ./install.sh
 ```
 
-Скрипт делает пять вещей:
+### Windows 10/11
+
+В PowerShell (или двойным щелчком по `install.cmd`):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+Если у вас установлен Git for Windows, можно использовать и bash-версию из
+Git Bash:
+
+```bash
+./install.sh
+```
+
+### Что делает установщик
 
 1. находит компилятор Go версии 1.22 или новее;
-2. собирает бинарник из `./cmd/ttd`;
-3. копирует его в `~/.local/bin/ttd`;
-4. запускает `ttd install` — создаёт окружение `~/.local/share/ttd/venv` и
-   ставит в него `gallery-dl` и `yt-dlp`;
-5. добавляет `~/.local/bin` в `PATH` в `~/.bashrc` и `~/.zshrc`.
+2. собирает бинарник из `./cmd/ttd` (`ttd` или `ttd.exe`);
+3. копирует его в `~/.local/bin` (Windows: `%USERPROFILE%\.local\bin`);
+4. запускает `ttd install` — создаёт отдельное окружение и ставит в него
+   `gallery-dl` и `yt-dlp`:
+   `~/.local/share/ttd/venv` на Linux/macOS, `%APPDATA%\ttd\venv` на Windows;
+5. добавляет каталог с бинарником в PATH: `~/.bashrc` и `~/.zshrc` на
+   Linux/macOS, PATH пользователя на Windows.
 
 После этого команда `ttd` работает из любого каталога, а каталог с исходниками
-можно удалить — движки лежат отдельно, в `~/.local/share/ttd/venv`.
+можно удалить — движки лежат отдельно, в каталоге данных.
 
 Чтобы изменения `PATH` применились в текущем терминале:
 
 ```bash
-source ~/.bashrc     # для bash
-source ~/.zshrc      # для zsh
+source ~/.bashrc     # bash
+source ~/.zshrc      # zsh
 ```
 
 или просто откройте новый терминал.
 
 ### Параметры установщика
 
-| Параметр | Что делает |
-| --- | --- |
-| `--bin-dir <путь>` | куда положить бинарник (по умолчанию `~/.local/bin`) |
-| `--data-dir <путь>` | куда поставить движки (по умолчанию `~/.local/share/ttd`) |
-| `--system` | системная установка в `/usr/local` (запускать через `sudo`) |
-| `--no-engines` | не устанавливать `gallery-dl` и `yt-dlp` |
-| `--no-rc` | не менять `~/.bashrc` и `~/.zshrc` |
-| `--uninstall` | удалить программу и движки |
-| `--purge` | вместе с `--uninstall` удалить весь каталог данных |
+| `install.sh` | `install.ps1` | Что делает |
+| --- | --- | --- |
+| `--bin-dir <путь>` | `-BinDir <путь>` | куда положить бинарник |
+| `--data-dir <путь>` | `-DataDir <путь>` | куда поставить движки |
+| `--system` | — | установка в `/usr/local` (через `sudo`) |
+| `--no-engines` | `-NoEngines` | не устанавливать движки |
+| `--no-rc` | `-NoPath` | не менять PATH |
+| `--uninstall` | `-Uninstall` | удалить программу и движки |
+| `--purge` | `-Purge` | вместе с удалением убрать каталог данных |
 
 Примеры:
 
@@ -130,12 +159,17 @@ sudo ./install.sh --system            # в /usr/local/bin для всех пол
 ./install.sh --uninstall              # удалить программу и движки
 ```
 
+```powershell
+.\install.ps1 -BinDir D:\tools\ttd -NoEngines
+.\install.ps1 -Uninstall
+```
+
 ### Сборка вручную (без скрипта)
 
 ```bash
-go build -trimpath -ldflags "-s -w" -o ttd ./cmd/ttd   # собрать
-./ttd install                                          # движки в ~/.local/share/ttd/venv
-install -m 0755 ./ttd ~/.local/bin/ttd                 # в PATH
+go build -trimpath -ldflags "-s -w" -o ttd ./cmd/ttd   # Windows: -o ttd.exe
+./ttd install                                          # движки в каталог данных
+install -m 0755 ./ttd ~/.local/bin/ttd                 # Linux/macOS
 ```
 
 ---
@@ -164,6 +198,9 @@ yt-dlp: /home/user/.local/share/ttd/venv/bin/yt-dlp — 2026.08.19
 Строки `gallery-dl` и `yt-dlp` должны содержать версии. Если вместо этого
 написано «не найден» — повторите `ttd install`.
 
+В Windows тот же вывод будет содержать пути `C:\Users\…\AppData\…`, а движки —
+`…\venv\Scripts\gallery-dl.exe` и `…\yt-dlp.exe`. Это нормально.
+
 Если вы собирали программу вручную и запускаете её из каталога с исходниками,
 движки могут находиться в `<каталог>/.venv` — это тоже нормально: `ttd` сначала
 ищет окружение рядом с исходниками, затем в каталоге данных.
@@ -180,6 +217,12 @@ ttd "https://www.tiktok.com/@user/video/7412345678901234567"
 
 ```
 ~/ttd/19.10.2026 | 17.10.2026/user_7412345678901234567.mp4
+```
+
+В Windows папка называется `19.10.2026 - 17.10.2026` (символ `|` там запрещён):
+
+```
+C:\Users\user\ttd\19.10.2026 - 17.10.2026\user_7412345678901234567.mp4
 ```
 
 Без обращения к TikTok установку можно проверить на встроенном демо-движке:
@@ -220,7 +263,7 @@ ttd tui
 
 ```bash
 ttd web
-# или
+# или (Linux/macOS/Git Bash):
 ./scripts/serve.sh
 ```
 
@@ -231,6 +274,8 @@ ttd web
 ```bash
 ./scripts/serve.sh --port 9000 --no-browser
 ```
+
+В Windows используйте `ttd web` (или `scripts/serve.sh` из Git Bash).
 
 ---
 
@@ -270,6 +315,14 @@ git pull
 ./install.sh                  # пересоберёт бинарник и обновит движки
 ```
 
+На Windows:
+
+```powershell
+cd ttd
+git pull
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
+
 Если исходники уже удалены, а обновлять нужно только движки:
 
 ```bash
@@ -280,17 +333,26 @@ ttd install
 
 ## 10. Удаление
 
+Linux/macOS:
+
 ```bash
 ./install.sh --uninstall      # бинарник, движки и строки PATH в ~/.bashrc и ~/.zshrc
 ./install.sh --uninstall --purge   # плюс весь каталог данных ~/.local/share/ttd
 ```
 
+Windows (PowerShell):
+
+```powershell
+.\install.ps1 -Uninstall
+.\install.ps1 -Uninstall -Purge
+```
+
 Вручную:
 
 ```bash
-rm -f ~/.local/bin/ttd                 # программа
-rm -rf ~/.local/share/ttd              # движки и данные
-rm -rf ~/.config/ttd                   # настройки
+rm -f ~/.local/bin/ttd                 # программа (Windows: ttd.exe)
+rm -rf ~/.local/share/ttd              # движки и данные (Windows: %APPDATA%\ttd)
+rm -rf ~/.config/ttd                   # настройки (Windows: %APPDATA%\ttd\config.json)
 rm -rf ~/ttd                           # скачанные файлы (!)
 ```
 
@@ -311,9 +373,35 @@ echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
 ```
 
+В Windows откройте новый терминал после `install.ps1` и проверьте:
+`ttd doctor`. PATH пользователя можно посмотреть так:
+
+```powershell
+[Environment]::GetEnvironmentVariable('Path', 'User')
+```
+
+**Windows: `install.ps1` не запускается («выполнение сценариев отключено»)**
+Это стандартная политика PowerShell. Запускайте так:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+или двойным щелчком по `install.cmd`.
+
+**Windows: в TUI не работают стрелки/F-клавиши**
+Используйте Windows Terminal (рекомендуется) или conhost из Windows 10+.
+Если консоль не поддерживает виртуальный терминал, `ttd tui` автоматически
+перейдёт в построчный режим — загрузка при этом работает.
+
+**Windows: «не найден python3» при `ttd install`**
+Установите Python 3.9+ (`winget install Python.Python.3.12`) и откройте новый
+терминал. Установщик ищет `python3`, `python` и `py`.
+
 **`ttd` работает, но «движки не найдены» после переноса каталога**
-Движки ищутся в `~/.local/share/ttd/venv`. Запустите `ttd install` — он поставит
-их в каталог данных, независимо от места бинарника.
+Движки ищутся в каталоге данных: `~/.local/share/ttd/venv` на Linux/macOS,
+`%APPDATA%\ttd\venv` на Windows. Запустите `ttd install` — он поставит их туда
+независимо от места бинарника.
 
 **`go.mod requires go >= …`**
 Установщик выбирает Go 1.22+ автоматически. Если в `PATH` оказался старый Go,

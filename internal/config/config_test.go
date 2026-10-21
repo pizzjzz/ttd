@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -14,11 +15,17 @@ func isolate(t *testing.T) {
 	t.Setenv("TTD_HOME", t.TempDir())
 	t.Setenv("TTD_VENV", "")
 	t.Setenv("TTD_DATA_DIR", "")
+	if runtime.GOOS == "windows" {
+		t.Setenv("APPDATA", t.TempDir())
+	}
 }
 
-func TestDataDirDefaultsToLocalShare(t *testing.T) {
+func TestDataDirDefaults(t *testing.T) {
 	isolate(t)
 	want := filepath.Join(os.Getenv("HOME"), ".local", "share", "ttd")
+	if runtime.GOOS == "windows" {
+		want = filepath.Join(os.Getenv("APPDATA"), "ttd")
+	}
 	if got := DataDir(); got != want {
 		t.Fatalf("DataDir = %q, ожидалось %q", got, want)
 	}

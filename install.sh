@@ -6,6 +6,9 @@
 # чтобы команда `ttd` работала из любого каталога — даже если исходники
 # удалить. Движки (gallery-dl, yt-dlp) ставятся в отдельный каталог данных.
 #
+# Поддерживаются Linux, macOS и Windows (Git Bash / MSYS2 / Cygwin).
+# Для cmd и PowerShell на Windows есть отдельный install.ps1.
+#
 # Примеры:
 #   ./install.sh                       обычная установка для текущего пользователя
 #   ./install.sh --system              системная установка (нужен root)
@@ -25,16 +28,47 @@ SYSTEM=0
 
 ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 
+# --------------------------------------------------------------------------
+# Определение платформы: Linux, macOS или Windows (Git Bash / MSYS2 / Cygwin)
+# --------------------------------------------------------------------------
+UNAME="$(uname -s 2>/dev/null || echo unknown)"
+EXE=""
+case "$UNAME" in
+  Linux*)                     PLATFORM="Linux" ;;
+  Darwin*)                    PLATFORM="macOS" ;;
+  MINGW*|MSYS*|CYGWIN*)       PLATFORM="Windows (Git Bash)"; EXE=".exe" ;;
+  *)                          PLATFORM="$UNAME" ;;
+esac
+
+# В Windows по умолчанию используем тот же каталог данных, что и install.ps1:
+# %APPDATA%\ttd. Если TTD_DATA_DIR задан явно — уважаем его.
+if [ -z "${TTD_DATA_DIR:-}" ] && [ "$EXE" = ".exe" ] && [ -n "${APPDATA:-}" ]; then
+  if command -v cygpath >/dev/null 2>&1; then
+    DATA_DIR="$(cygpath -u "$APPDATA")/ttd"
+  fi
+fi
+
+# native_path переводит путь в формат, понятный установленному бинарнику.
+# На Windows (Git Bash) это C:\..., на Linux/macOS путь не меняется.
+native_path() {
+  if command -v cygpath >/dev/null 2>&1; then
+    cygpath -w "$1"
+  else
+    printf '%s' "$1"
+  fi
+}
+
 usage() {
   cat <<'EOF'
-Установщик ttd
+Установщик ttd (Linux, macOS, Windows через Git Bash/MSYS2)
 
 Использование:
   ./install.sh [параметры]
 
 Параметры:
   --bin-dir <путь>    куда положить бинарник (по умолчанию ~/.local/bin)
-  --data-dir <путь>   куда поставить движки (по умолчанию ~/.local/share/ttd)
+  --data-dir <путь>   куда поставить движки
+                      (Linux/macOS: ~/.local/share/ttd, Windows: %APPDATA%\ttd)
   --system            системная установка в /usr/local (запускать через sudo)
   --no-engines        не устанавливать gallery-dl и yt-dlp
   --no-rc             не добавлять PATH в ~/.bashrc и ~/.zshrc
@@ -44,6 +78,10 @@ usage() {
 
 Переменные окружения:
   TTD_BIN_DIR, TTD_DATA_DIR — то же, что --bin-dir и --data-dir.
+
+Windows:
+  В Git Bash скрипт ставит ttd.exe и настраивает bash. Для cmd и PowerShell
+  используйте native-установщик:  powershell -ExecutionPolicy Bypass -File install.ps1
 EOF
 }
 
@@ -81,7 +119,7 @@ fi
 expand_tilde() {
   case "$1" in
     "~") printf '%s' "$HOME" ;;
-    "~/"*) printf '%s' "$HOME/${1#\~/}" ;;
+    "~/"*) printf '%s' "$HOME/${1:2}" ;;
     *) printf '%s' "$1" ;;
   esac
 }
@@ -105,11 +143,11 @@ remove_rc_block() {
 
 if [ "$UNINSTALL" = 1 ]; then
   echo "==> Удаляю ttd"
-  if [ -e "$BIN_DIR/ttd" ] || [ -L "$BIN_DIR/ttd" ]; then
-    rm -f "$BIN_DIR/ttd"
-    echo "    удалён $BIN_DIR/ttd"
+  if [ -e "$BIN_DIR/ttd$EXE" ] || [ -L "$BIN_DIR/ttd$EXE" ]; then
+    rm -f "$BIN_DIR/ttd$EXE"
+    echo "    удалён $BIN_DIR/ttd$EXE"
   else
-    echo "    $BIN_DIR/ttd не найден"
+    echo "    $BIN_DIR/ttd$EXE не найден"
   fi
   remove_rc_block "$HOME/.bashrc"
   remove_rc_block "$HOME/.zshrc"
@@ -171,6 +209,7 @@ EOF
   exit 1
 fi
 
+echo "==> Платформа:  $PLATFORM"
 echo "==> Компилятор: $("$GO" version)"
 echo "==> Исходники:  $ROOT"
 
@@ -187,10 +226,19 @@ TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 echo "==> Собираю ttd"
-( cd "$ROOT" && "$GO" build -trimpath -ldflags "-s -w" -o "$TMP_DIR/ttd" ./cmd/ttd )
+( cd "$ROOT" && "$GO" build -trimpath -ldflags "-s -w" -o "$TMP_DIR/ttd$EXE" ./cmd/ttd )
 
-echo "==> Устанавливаю бинарник в $BIN_DIR/ttd"
-install -m 0755 "$TMP_DIR/ttd" "$BIN_DIR/ttd"
+echo "==> Устанавливаю бинарник в $BIN_DIR/ttd$EXE"
+# В Git Bash на Windows команды install может не быть — тогда cp + chmod.
+if command -v install >/dev/null 2>&1; then
+  install -m 0755 "$TMP_DIR/ttd$EXE" "$BIN_DIR/ttd$EXE"
+else
+  cp "$TMP_DIR/ttd$EXE" "$BIN_DIR/ttd$EXE"
+  chmod 0755 "$BIN_DIR/ttd$EXE" 2>/dev/null || true
+fi
+
+# Путь, который поймёт сам бинарник (на Windows — C:\...).
+DATA_DIR_NATIVE="$(native_path "$DATA_DIR")"
 
 # --------------------------------------------------------------------------
 # Движки в постоянный каталог данных
@@ -198,10 +246,10 @@ install -m 0755 "$TMP_DIR/ttd" "$BIN_DIR/ttd"
 ENGINES_OK=1
 if [ "$WITH_ENGINES" = 1 ]; then
   echo "==> Устанавливаю движки (gallery-dl, yt-dlp) в $DATA_DIR/venv"
-  if ! TTD_DATA_DIR="$DATA_DIR" "$BIN_DIR/ttd" install; then
+  if ! TTD_DATA_DIR="$DATA_DIR_NATIVE" "$BIN_DIR/ttd$EXE" install; then
     ENGINES_OK=0
     echo "ttd: движки установить не удалось. Программа установлена," >&2
-    echo "     повторите позже:  TTD_DATA_DIR=\"$DATA_DIR\" ttd install" >&2
+    echo "     повторите позже:  TTD_DATA_DIR=\"$DATA_DIR_NATIVE\" ttd install" >&2
   fi
 else
   echo "==> Движки пропущены (--no-engines)"
@@ -251,17 +299,17 @@ fi
 # --------------------------------------------------------------------------
 echo
 echo "==> Проверка установки"
-if ! TTD_DATA_DIR="$DATA_DIR" "$BIN_DIR/ttd" --version; then
+if ! TTD_DATA_DIR="$DATA_DIR_NATIVE" "$BIN_DIR/ttd$EXE" --version; then
   echo "ttd: установленный бинарник не запускается" >&2
   exit 1
 fi
 if [ "$WITH_ENGINES" = 0 ]; then
-  TTD_DATA_DIR="$DATA_DIR" "$BIN_DIR/ttd" doctor || true
+  TTD_DATA_DIR="$DATA_DIR_NATIVE" "$BIN_DIR/ttd$EXE" doctor || true
 fi
 
 echo
 echo "=========================================================================="
-echo " ttd установлен: $BIN_DIR/ttd"
+echo " ttd установлен: $BIN_DIR/ttd$EXE ($PLATFORM)"
 if [ "$SYSTEM" = 1 ]; then
   echo " Программа доступна всем пользователям как /usr/local/bin/ttd."
 elif [ "$EDIT_RC" = 1 ]; then
@@ -272,10 +320,14 @@ elif [ "$EDIT_RC" = 1 ]; then
 else
   echo " Добавьте каталог в PATH вручную: export PATH=\"$BIN_DIR:\$PATH\""
 fi
+if [ "$EXE" = ".exe" ]; then
+  echo
+  echo " Для cmd/PowerShell используйте native-установщик: .\\install.ps1"
+fi
 if [ "$ENGINES_OK" = 0 ]; then
   echo
   echo " ВНИМАНИЕ: движки не установлены — загрузка пока не работает."
-  echo " Повторите:  TTD_DATA_DIR=\"$DATA_DIR\" ttd install"
+  echo " Повторите:  TTD_DATA_DIR=\"$DATA_DIR_NATIVE\" ttd install"
 fi
 echo
 echo " Проверка:  ttd doctor"

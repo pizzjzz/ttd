@@ -15,11 +15,18 @@ import (
 	"ttd/internal/util"
 )
 
-var pythonNames = []string{"python3", "python"}
+var pythonNames = []string{"python3", "python", "py"}
 
 // FindPython ищет интерпретатор Python.
 func FindPython() string {
 	return util.FindExecutable(pythonNames, nil)
+}
+
+func exeName(name string) string {
+	if runtime.GOOS == "windows" {
+		return name + ".exe"
+	}
+	return name
 }
 
 // VenvBinDir — каталог с исполняемыми файлами окружения.
@@ -70,11 +77,11 @@ func Bootstrap(ctx context.Context, cfg *config.Config, onEvent func(model.Event
 		}
 	}
 
-	pip := filepath.Join(VenvBinDir(cfg), "pip")
+	pip := filepath.Join(VenvBinDir(cfg), exeName("pip"))
 	if _, err := os.Stat(pip); err != nil {
 		return fmt.Errorf("в окружении нет pip: %s", pip)
 	}
-	pythonVenv := filepath.Join(VenvBinDir(cfg), "python")
+	pythonVenv := filepath.Join(VenvBinDir(cfg), exeName("python"))
 	if _, err := os.Stat(pythonVenv); err != nil {
 		pythonVenv = python
 	}

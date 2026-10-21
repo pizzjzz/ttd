@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -173,6 +174,9 @@ func CandidateBinDirs() []string {
 	dirs := make([]string, 0, 12)
 	for _, venv := range config.VenvCandidates() {
 		dirs = append(dirs, filepath.Join(venv, "bin"), filepath.Join(venv, "Scripts"))
+	}
+	if runtime.GOOS == "windows" {
+		return dirs
 	}
 	home, _ := os.UserHomeDir()
 	dirs = append(dirs,

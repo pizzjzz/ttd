@@ -1,4 +1,4 @@
-//go:build !linux
+//go:build !linux && !darwin && !windows
 
 package tui
 
@@ -6,7 +6,7 @@ import "errors"
 
 type rawState struct{}
 
-// enterRaw не поддерживается вне Linux.
+// enterRaw не поддерживается на этой платформе — TUI перейдёт в простой режим.
 func enterRaw(fd int) (*rawState, error) {
 	return nil, errors.New("raw-режим не поддерживается на этой платформе")
 }

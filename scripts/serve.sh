@@ -11,17 +11,25 @@ while [ -L "$SOURCE" ]; do
   [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
 done
 ROOT="$(cd -P "$(dirname "$SOURCE")/.." >/dev/null 2>&1 && pwd)"
+
+# На Windows (Git Bash / MSYS2) бинарник называется ttd.exe.
+EXE=""
+case "$(uname -s 2>/dev/null || echo unknown)" in
+  MINGW*|MSYS*|CYGWIN*) EXE=".exe" ;;
+esac
+BIN="$ROOT/ttd$EXE"
+
 cd "$ROOT"
 
-if [ ! -x ./ttd ]; then
+if [ ! -x "$BIN" ]; then
   GO="$(command -v go || true)"
   [ -z "$GO" ] && [ -x "$HOME/.local/go/bin/go" ] && GO="$HOME/.local/go/bin/go"
   if [ -z "$GO" ]; then
-    echo "ttd ещё не собран, а Go не найден. Запустите scripts/install.sh" >&2
+    echo "ttd ещё не собран, а Go не найден. Запустите ./install.sh" >&2
     exit 1
   fi
-  echo "==> Собираю ./ttd"
-  "$GO" build -trimpath -ldflags "-s -w" -o ttd ./cmd/ttd
+  echo "==> Собираю $BIN"
+  "$GO" build -trimpath -ldflags "-s -w" -o "$BIN" ./cmd/ttd
 fi
 
-exec ./ttd web "$@"
+exec "$BIN" web "$@"

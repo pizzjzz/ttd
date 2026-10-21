@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -81,8 +82,15 @@ func ProjectRoot() string {
 	return dir
 }
 
-// ConfigFile — путь к файлу настроек (~/.config/ttd/config.json).
+// ConfigFile — путь к файлу настроек.
+//
+// Linux/macOS: ~/.config/ttd/config.json; Windows: %AppData%\ttd\config.json.
 func ConfigFile() string {
+	if runtime.GOOS == "windows" {
+		if dir, err := os.UserConfigDir(); err == nil {
+			return filepath.Join(dir, "ttd", "config.json")
+		}
+	}
 	base := os.Getenv("XDG_CONFIG_HOME")
 	if base == "" {
 		home, err := os.UserHomeDir()
@@ -152,11 +160,16 @@ func (c Config) MediaPath() string {
 func (c Config) CacheDir() string { return filepath.Join(c.MediaPath(), ".ttd-cache") }
 
 // DataDir — стабильный каталог данных установленного ttd (движки, окружение).
-// По умолчанию ~/.local/share/ttd; переопределяется TTD_DATA_DIR или
-// XDG_DATA_HOME.
+// По умолчанию ~/.local/share/ttd (Linux/macOS) или %AppData%\ttd (Windows);
+// переопределяется TTD_DATA_DIR или XDG_DATA_HOME.
 func DataDir() string {
 	if value := os.Getenv("TTD_DATA_DIR"); value != "" {
 		return util.ExpandHome(value)
+	}
+	if runtime.GOOS == "windows" {
+		if dir, err := os.UserConfigDir(); err == nil {
+			return filepath.Join(dir, "ttd")
+		}
 	}
 	if value := os.Getenv("XDG_DATA_HOME"); value != "" {
 		return filepath.Join(util.ExpandHome(value), "ttd")
@@ -175,7 +188,9 @@ func DataDirs() []string {
 	if home, err := os.UserHomeDir(); err == nil {
 		dirs = append(dirs, filepath.Join(home, ".local", "share", "ttd"))
 	}
-	dirs = append(dirs, "/usr/local/share/ttd", "/usr/share/ttd")
+	if runtime.GOOS != "windows" {
+		dirs = append(dirs, "/usr/local/share/ttd", "/usr/share/ttd")
+	}
 	return dedupePaths(dirs)
 }
 

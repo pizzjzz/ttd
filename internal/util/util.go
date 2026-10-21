@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -156,12 +157,22 @@ func SafeJoin(root string, parts ...string) (string, bool) {
 
 // ExpandHome разворачивает ведущий ~ в домашний каталог.
 func ExpandHome(path string) string {
-	if path == "~" || strings.HasPrefix(path, "~/") {
+	if path == "~" {
 		if home, err := os.UserHomeDir(); err == nil {
-			if path == "~" {
-				return home
-			}
-			return filepath.Join(home, path[2:])
+			return home
+		}
+		return path
+	}
+	prefix := "~/"
+	if runtime.GOOS == "windows" {
+		// В Windows пользователи часто пишут ~\ttd.
+		if strings.HasPrefix(path, `~\`) {
+			prefix = `~\`
+		}
+	}
+	if strings.HasPrefix(path, prefix) {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, path[len(prefix):])
 		}
 	}
 	return path

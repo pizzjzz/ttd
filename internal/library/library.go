@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -13,9 +14,17 @@ import (
 )
 
 // Separator — разделитель между датой скачивания и датой публикации.
-const Separator = " | "
+// На Windows символ "|" запрещён в именах файлов, поэтому там используется "-".
+var Separator = func() string {
+	if runtime.GOOS == "windows" {
+		return " - "
+	}
+	return " | "
+}()
 
-var pairRe = regexp.MustCompile(`^(\d{2}\.\d{2}\.\d{4}) \| (\d{2}\.\d{2}\.\d{4})$`)
+// pairRe принимает оба разделителя, чтобы библиотека, созданная на одной
+// платформе, читалась на другой.
+var pairRe = regexp.MustCompile(`^(\d{2}\.\d{2}\.\d{4})\s*[|\-]\s*(\d{2}\.\d{2}\.\d{4})$`)
 
 // FolderName собирает имя папки вида "19.10.2026 | 17.10.2026".
 func FolderName(download, publish string) string {

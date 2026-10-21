@@ -105,9 +105,10 @@ func Run(ctx context.Context, cfg config.Config, date string, verbose bool) int 
 	}
 	t.raw = raw
 	defer func() {
-		raw.restore()
+		// Сначала показываем курсор (пока VT ещё включён), затем возвращаем режим.
 		fmt.Fprint(t.out, "\x1b[?25h\r\n")
 		t.out.Flush()
+		raw.restore()
 	}()
 	fmt.Fprint(t.out, "\x1b[?25l")
 	return t.loop(ctx)

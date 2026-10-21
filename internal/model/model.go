@@ -109,7 +109,8 @@ type PlannedURL struct {
 	URL  string
 }
 
-// Folder — папка библиотеки вида "19.10.2026 | 17.10.2026".
+// Folder — папка библиотеки вида "19.10.2026 | 17.10.2026"
+// (в Windows разделитель "-": "19.10.2026 - 17.10.2026").
 type Folder struct {
 	Name         string      `json:"name"`
 	Path         string      `json:"path"`

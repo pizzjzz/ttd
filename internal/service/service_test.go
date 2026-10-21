@@ -97,7 +97,10 @@ func TestPlaceSplitsByPublishDate(t *testing.T) {
 	for _, folder := range folders {
 		found[folder.Name] = true
 	}
-	for _, want := range []string{"19.10.2026 | 17.10.2026", "19.10.2026 | 01.10.2025"} {
+	for _, want := range []string{
+		library.FolderName("19.10.2026", "17.10.2026"),
+		library.FolderName("19.10.2026", "01.10.2025"),
+	} {
 		if !found[want] {
 			t.Fatalf("нет папки %q, есть: %v", want, found)
 		}

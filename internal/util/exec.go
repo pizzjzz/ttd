@@ -7,7 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"syscall"
+	"runtime"
 	"time"
 )
 
@@ -19,7 +19,7 @@ type RunResult struct {
 }
 
 // RunStream запускает команду, построчно отдавая объединённый stdout+stderr.
-// При отмене контекста процесс получает SIGTERM.
+// При отмене контекста процесс завершается (SIGTERM на Unix, Kill на Windows).
 func RunStream(ctx context.Context, name string, args []string, env []string, onLine func(string)) RunResult {
 	cmd := exec.CommandContext(ctx, name, args...)
 	if env == nil {
@@ -29,7 +29,7 @@ func RunStream(ctx context.Context, name string, args []string, env []string, on
 	cmd.Stdin = nil
 	cmd.Cancel = func() error {
 		if cmd.Process != nil {
-			return cmd.Process.Signal(syscall.SIGTERM)
+			return terminateProcess(cmd.Process)
 		}
 		return nil
 	}
@@ -89,23 +89,47 @@ func Capture(ctx context.Context, name string, args []string, env []string) (str
 }
 
 // FindExecutable ищет исполняемый файл в заданных каталогах, затем в PATH.
+// На Windows учитывает расширения .exe/.cmd/.bat.
 func FindExecutable(names []string, extraDirs []string) string {
 	for _, dir := range extraDirs {
 		if dir == "" {
 			continue
 		}
 		for _, name := range names {
-			candidate := filepath.Join(dir, name)
-			info, err := os.Stat(candidate)
-			if err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
-				return candidate
+			for _, candidate := range executableNames(name) {
+				path := filepath.Join(dir, candidate)
+				info, err := os.Stat(path)
+				if err == nil && isExecutable(info) {
+					return path
+				}
 			}
 		}
 	}
 	for _, name := range names {
-		if path, err := exec.LookPath(name); err == nil {
-			return path
+		for _, candidate := range executableNames(name) {
+			if path, err := exec.LookPath(candidate); err == nil {
+				return path
+			}
 		}
 	}
 	return ""
+}
+
+// executableNames добавляет Windows-расширения, если их нет в имени.
+func executableNames(name string) []string {
+	if runtime.GOOS != "windows" || filepath.Ext(name) != "" {
+		return []string{name}
+	}
+	return []string{name + ".exe", name + ".cmd", name + ".bat", name}
+}
+
+func isExecutable(info os.FileInfo) bool {
+	if info.IsDir() {
+		return false
+	}
+	// На Windows бит исполнения не выставляется — достаточно, что это файл.
+	if runtime.GOOS == "windows" {
+		return true
+	}
+	return info.Mode()&0o111 != 0
 }
